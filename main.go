@@ -17,7 +17,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/go-piv/piv-go/piv"
@@ -35,6 +38,14 @@ func main() {
 	flag.Parse()
 
 	a := &Agent{}
+
+	c := make(chan os.Signal)
+	signal.Notify(c, syscall.SIGHUP)
+	go func() {
+		for range c {
+			a.Close()
+		}
+	}()
 
 	os.Remove(*socketPath)
 	l, err := net.Listen("unix", *socketPath)
@@ -61,6 +72,7 @@ func main() {
 }
 
 type Agent struct {
+	mu     sync.Mutex
 	yk     *piv.YubiKey
 	serial uint32
 }
@@ -114,6 +126,18 @@ func (a *Agent) connectToYK() (*piv.YubiKey, error) {
 	return yk, nil
 }
 
+func (a *Agent) Close() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.yk != nil {
+		log.Println("Received SIGHUP, dropping YubiKey transaction...")
+		err := a.yk.Close()
+		a.yk = nil
+		return err
+	}
+	return nil
+}
+
 func (a *Agent) getPIN() (string, error) {
 	p, err := pinentry.New()
 	if err != nil {
@@ -128,9 +152,12 @@ func (a *Agent) getPIN() (string, error) {
 }
 
 func (a *Agent) List() ([]*agent.Key, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if err := a.ensureYK(); err != nil {
 		return nil, fmt.Errorf("could not reach YubiKey: %w", err)
 	}
+
 	pk, err := getPublicKey(a.yk, piv.SlotAuthentication)
 	if err != nil {
 		return nil, err
@@ -159,9 +186,16 @@ func getPublicKey(yk *piv.YubiKey, slot piv.Slot) (ssh.PublicKey, error) {
 }
 
 func (a *Agent) Signers() ([]ssh.Signer, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if err := a.ensureYK(); err != nil {
 		return nil, fmt.Errorf("could not reach YubiKey: %w", err)
 	}
+
+	return a.signers()
+}
+
+func (a *Agent) signers() ([]ssh.Signer, error) {
 	pk, err := getPublicKey(a.yk, piv.SlotAuthentication)
 	if err != nil {
 		return nil, err
@@ -186,7 +220,13 @@ func (a *Agent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
 }
 
 func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.SignatureFlags) (*ssh.Signature, error) {
-	signers, err := a.Signers()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.ensureYK(); err != nil {
+		return nil, fmt.Errorf("could not reach YubiKey: %w", err)
+	}
+
+	signers, err := a.signers()
 	if err != nil {
 		return nil, err
 	}
