@@ -61,7 +61,8 @@ func main() {
 }
 
 type Agent struct {
-	yk *piv.YubiKey
+	yk     *piv.YubiKey
+	serial uint32
 }
 
 var _ agent.ExtendedAgent = &Agent{}
@@ -73,13 +74,16 @@ func (a *Agent) serveConn(c net.Conn) {
 }
 
 func healthy(yk *piv.YubiKey) bool {
-	_, err := yk.Serial()
+	// We can't use Serial because it locks the session on older firmwares, and
+	// can't use Retries because it fails when the session is unlocked.
+	_, err := yk.AttestationCertificate()
 	return err == nil
 }
 
 func (a *Agent) ensureYK() error {
 	if a.yk == nil || !healthy(a.yk) {
 		if a.yk != nil {
+			log.Println("Reconnecting to the YubiKey...")
 			a.yk.Close()
 		}
 		yk, err := a.connectToYK()
@@ -100,7 +104,14 @@ func (a *Agent) connectToYK() (*piv.YubiKey, error) {
 		return nil, errors.New("no YubiKey detected")
 	}
 	// TODO: support multiple YubiKeys.
-	return piv.Open(cards[0])
+	yk, err := piv.Open(cards[0])
+	if err != nil {
+		return nil, err
+	}
+	// Cache the serial number locally because requesting it on older firmwares
+	// requires switching application, which drops the PIN cache.
+	a.serial, _ = yk.Serial()
+	return yk, nil
 }
 
 func (a *Agent) getPIN() (string, error) {
@@ -110,14 +121,11 @@ func (a *Agent) getPIN() (string, error) {
 	}
 	defer p.Close()
 	p.Set("title", "yubikey-agent PIN Prompt")
-	serial, _ := a.yk.Serial()
-	p.Set("desc", fmt.Sprintf("YubiKey serial number: %d", serial))
+	p.Set("desc", fmt.Sprintf("YubiKey serial number: %d", a.serial))
 	p.Set("prompt", "Please enter your PIN:")
 	pin, err := p.GetPin()
 	return string(pin), err
 }
-
-var ErrOperationUnsupported = errors.New("operation unsupported")
 
 func (a *Agent) List() ([]*agent.Key, error) {
 	if err := a.ensureYK(); err != nil {
@@ -127,16 +135,15 @@ func (a *Agent) List() ([]*agent.Key, error) {
 	if err != nil {
 		return nil, err
 	}
-	serial, _ := a.yk.Serial()
 	return []*agent.Key{{
 		Format:  pk.Type(),
 		Blob:    pk.Marshal(),
-		Comment: fmt.Sprintf("YubiKey #%d PIV Slot 9a", serial),
+		Comment: fmt.Sprintf("YubiKey #%d PIV Slot 9a", a.serial),
 	}}, nil
 }
 
 func getPublicKey(yk *piv.YubiKey, slot piv.Slot) (ssh.PublicKey, error) {
-	cert, err := yk.Attest(slot)
+	cert, err := yk.Certificate(slot)
 	if err != nil {
 		return nil, fmt.Errorf("could not get public key: %w", err)
 	}
@@ -174,6 +181,10 @@ func (a *Agent) Signers() ([]ssh.Signer, error) {
 	return []ssh.Signer{s}, nil
 }
 
+func (a *Agent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
+	return a.SignWithFlags(key, data, 0)
+}
+
 func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.SignatureFlags) (*ssh.Signature, error) {
 	signers, err := a.Signers()
 	if err != nil {
@@ -190,21 +201,18 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 		case flags&agent.SignatureFlagRsaSha512 != 0:
 			alg = ssh.SigAlgoRSASHA2512
 		}
-		// TODO: the PIN is asked every time even if the policy is "once".
-		// This is an upstream issue: https://github.com/go-piv/piv-go/issues/35
 		// TODO: maybe retry if the PIN is not correct?
 		return s.(ssh.AlgorithmSigner).SignWithAlgorithm(rand.Reader, data, alg)
 	}
 	return nil, fmt.Errorf("no private keys match the requested public key")
 }
 
-func (a *Agent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
-	return a.SignWithFlags(key, data, 0)
-}
-
 func (a *Agent) Extension(extensionType string, contents []byte) ([]byte, error) {
 	return nil, agent.ErrExtensionUnsupported
 }
+
+var ErrOperationUnsupported = errors.New("operation unsupported")
+
 func (a *Agent) Add(key agent.AddedKey) error {
 	return ErrOperationUnsupported
 }
