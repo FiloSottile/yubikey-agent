@@ -1,5 +1,5 @@
-github.com/go-piv/piv-go v1.4.1-0.20200426040337-bf7b63063bf0 h1:Ft86hUvyWPsygFFD9HKdLvMDqVG9StpvcU3Cdh5d/ss=
-github.com/go-piv/piv-go v1.4.1-0.20200426040337-bf7b63063bf0/go.mod h1:ON2WvQncm7dIkCQ7kYJs+nc3V4jHGfrrJnSF8HKy7Gk=
+github.com/go-piv/piv-go v1.4.1-0.20200427235916-e1789b385125 h1:Wr9r16amNbLd3hwznq7HnaVmCR87Vl7uvTGWXXAnXzI=
+github.com/go-piv/piv-go v1.4.1-0.20200427235916-e1789b385125/go.mod h1:ON2WvQncm7dIkCQ7kYJs+nc3V4jHGfrrJnSF8HKy7Gk=
 github.com/gopasspw/gopass v1.8.6 h1:TWF7Zsj63xR+T6qIRKZ0ZM0fRDBfSv10yd9rLn631SE=
 github.com/gopasspw/gopass v1.8.6/go.mod h1:IvJpW3zL4Dmp9uPntPl4tLgX3V+CymjeSwtx0NTkf98=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=

@@ -17,8 +17,8 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -27,15 +27,35 @@ import (
 	"github.com/gopasspw/gopass/pkg/pinentry"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 func main() {
-	var defaultPath string
-	if cacheDir, err := os.UserCacheDir(); err == nil {
-		defaultPath = filepath.Join(cacheDir, "yubikey-agent.sock")
-	}
-	socketPath := flag.String("l", defaultPath, "path of the UNIX socket to listen on")
+	socketPath := flag.String("l", "", "path of the UNIX socket to listen on")
 	flag.Parse()
+
+	switch len(flag.Args()) {
+	case 0:
+		if *socketPath == "" {
+			log.Fatal("Missing socket path (-l flag).")
+		}
+		runAgent(*socketPath)
+	default:
+		flag.Usage()
+		os.Exit(1)
+	}
+}
+
+func runAgent(socketPath string) {
+	if _, err := exec.LookPath(pinentry.GetBinary()); err != nil {
+		log.Fatalf("PIN entry program %q not found!", pinentry.GetBinary())
+	}
+
+	if terminal.IsTerminal(int(os.Stdin.Fd())) {
+		log.Println("Warning: yubikey-agent is meant to run as a background daemon.")
+		log.Println("Running multiple instances is likely to lead to conflicts.")
+		log.Println("Consider using the launchd or systemd services.")
+	}
 
 	a := &Agent{}
 
@@ -47,12 +67,11 @@ func main() {
 		}
 	}()
 
-	os.Remove(*socketPath)
-	l, err := net.Listen("unix", *socketPath)
+	os.Remove(socketPath)
+	l, err := net.Listen("unix", socketPath)
 	if err != nil {
 		log.Fatalln("Failed to listen on UNIX socket:", err)
 	}
-	fmt.Printf("export SSH_AUTH_SOCK=%q\n", *socketPath)
 
 	for {
 		c, err := l.Accept()
@@ -81,7 +100,7 @@ var _ agent.ExtendedAgent = &Agent{}
 
 func (a *Agent) serveConn(c net.Conn) {
 	if err := agent.ServeAgent(a, c); err != io.EOF {
-		log.Println("Connection ended with error:", err)
+		log.Println("Agent client connection ended with error:", err)
 	}
 }
 
@@ -97,6 +116,8 @@ func (a *Agent) ensureYK() error {
 		if a.yk != nil {
 			log.Println("Reconnecting to the YubiKey...")
 			a.yk.Close()
+		} else {
+			log.Println("Connecting to the YubiKey...")
 		}
 		yk, err := a.connectToYK()
 		if err != nil {
