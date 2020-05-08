@@ -1,4 +1,4 @@
-// Copyright 2019 Google LLC
+// Copyright 2020 Google LLC
 //
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file or at
@@ -31,18 +31,42 @@ import (
 )
 
 func main() {
-	socketPath := flag.String("l", "", "path of the UNIX socket to listen on")
+	log.SetFlags(0)
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage of yubikey-agent:\n")
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "\tyubikey-agent -setup\n")
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "\t\tGenerate a new SSH key on the attached YubiKey.\n")
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "\tyubikey-agent -l PATH\n")
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "\t\tRun the agent, listening on the UNIX socket at PATH.\n")
+		fmt.Fprintf(os.Stderr, "\n")
+	}
+
+	socketPath := flag.String("l", "", "agent: path of the UNIX socket to listen on")
+	resetFlag := flag.Bool("really-delete-all-piv-keys", false, "setup: reset the PIV applet")
+	setupFlag := flag.Bool("setup", false, "setup: configure a new YubiKey")
 	flag.Parse()
 
-	switch len(flag.Args()) {
-	case 0:
-		if *socketPath == "" {
-			log.Fatal("Missing socket path (-l flag).")
-		}
-		runAgent(*socketPath)
-	default:
+	if flag.NArg() > 0 {
 		flag.Usage()
 		os.Exit(1)
+	}
+
+	if *setupFlag {
+		yk := connectForSetup()
+		if *resetFlag {
+			runReset(yk)
+		}
+		runSetup(yk)
+	} else {
+		if *socketPath == "" {
+			flag.Usage()
+			os.Exit(1)
+		}
+		runAgent(*socketPath)
 	}
 }
 

@@ -1,0 +1,205 @@
+// Copyright 2020 Google LLC
+//
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file or at
+// https://developers.google.com/open-source/licenses/bsd
+
+package main
+
+import (
+	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"errors"
+	"fmt"
+	"log"
+	"math/big"
+	"os"
+	"runtime/debug"
+	"time"
+
+	"github.com/go-piv/piv-go/piv"
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/terminal"
+)
+
+// Version can be set at link time to override debug.BuildInfo.Main.Version,
+// which is "(devel)" when building from within the module. See
+// golang.org/issue/29814 and golang.org/issue/29228.
+var Version string
+
+func init() {
+	if Version != "" {
+		return
+	}
+	if buildInfo, ok := debug.ReadBuildInfo(); ok {
+		Version = buildInfo.Main.Version
+		return
+	}
+	Version = "(unknown version)"
+}
+
+func connectForSetup() *piv.YubiKey {
+	cards, err := piv.Cards()
+	if err != nil {
+		log.Fatalln("Failed to enumerate tokens:", err)
+	}
+	if len(cards) == 0 {
+		log.Fatalln("No YubiKeys detected!")
+	}
+	// TODO: support multiple YubiKeys.
+	yk, err := piv.Open(cards[0])
+	if err != nil {
+		log.Fatalln("Failed to connect to the YubiKey:", err)
+	}
+	return yk
+}
+
+func runReset(yk *piv.YubiKey) {
+	fmt.Println("Resetting YubiKey PIV applet...")
+	if err := yk.Reset(); err != nil {
+		log.Fatalln("Failed to reset YubiKey:", err)
+	}
+}
+
+func runSetup(yk *piv.YubiKey) {
+	if _, err := yk.Certificate(piv.SlotAuthentication); err == nil {
+		log.Println("‼️  This YubiKey looks already setup")
+		log.Println("")
+		log.Println("If you want to wipe all PIV keys and start fresh,")
+		log.Fatalln("use --really-delete-all-piv-keys ⚠️")
+	} else if !errors.Is(err, piv.ErrNotFound) {
+		log.Fatalln("Failed to access authentication slot:", err)
+	}
+
+	fmt.Println("🔐 The PIN is up to 8 numbers, letters, or symbols.")
+	fmt.Println("👆 You'll need it once per session.")
+	fmt.Println("❌ The YubiKey gets locked if the wrong PIN is entered 3 times.")
+	fmt.Println("")
+	fmt.Print("Choose a new PIN: ")
+	pin, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Print("\n")
+	if err != nil {
+		log.Fatalln("Failed to read PIN:", err)
+	}
+	if len(pin) == 0 || len(pin) > 8 {
+		log.Fatalln("The PIN needs to be 1-8 characters.")
+	}
+	fmt.Print("Repeat PIN: ")
+	repeat, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Print("\n")
+	if err != nil {
+		log.Fatalln("Failed to read PIN:", err)
+	} else if !bytes.Equal(repeat, pin) {
+		log.Fatalln("PINs don't match!")
+	}
+
+	fmt.Println("")
+	fmt.Println("🧪 Reticulating splines...")
+
+	var key [24]byte
+	if _, err := rand.Read(key[:]); err != nil {
+		log.Fatal(err)
+	}
+	if err := yk.SetManagementKey(piv.DefaultManagementKey, key); err != nil {
+		log.Println("‼️  The default Management Key did not work")
+		log.Println("")
+		log.Println("If you know what you're doing, reset PIN, PUK, and")
+		log.Println("Management Key to the defaults before retrying.")
+		log.Println("")
+		log.Println("If you want to wipe all PIV keys and start fresh,")
+		log.Fatalln("use --really-delete-all-piv-keys ⚠️")
+	}
+	if err := yk.SetMetadata(key, &piv.Metadata{
+		ManagementKey: &key,
+	}); err != nil {
+		log.Fatalln("Failed to store the Management Key on the device:", err)
+	}
+	if err := yk.SetPIN(piv.DefaultPIN, string(pin)); err != nil {
+		log.Println("‼️  The default PIN did not work")
+		log.Println("")
+		log.Println("If you know what you're doing, reset PIN, PUK, and")
+		log.Println("Management Key to the defaults before retrying.")
+		log.Println("")
+		log.Println("If you want to wipe all PIV keys and start fresh,")
+		log.Fatalln("use --really-delete-all-piv-keys ⚠️")
+	}
+	if err := yk.SetPUK(piv.DefaultPUK, string(pin)); err != nil {
+		log.Println("‼️  The default PUK did not work")
+		log.Println("")
+		log.Println("If you know what you're doing, reset PIN, PUK, and")
+		log.Println("Management Key to the defaults before retrying.")
+		log.Println("")
+		log.Println("If you want to wipe all PIV keys and start fresh,")
+		log.Fatalln("use --really-delete-all-piv-keys ⚠️")
+	}
+
+	pub, err := yk.GenerateKey(key, piv.SlotAuthentication, piv.Key{
+		Algorithm:   piv.AlgorithmRSA2048,
+		PINPolicy:   piv.PINPolicyOnce,
+		TouchPolicy: piv.TouchPolicyAlways,
+	})
+	if err != nil {
+		log.Fatalln("Failed to generate key:", err)
+	}
+
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		log.Fatalln("Failed to generate parent key:", err)
+	}
+	parent := &x509.Certificate{
+		Subject: pkix.Name{
+			Organization:       []string{"yubikey-agent"},
+			OrganizationalUnit: []string{Version},
+		},
+		PublicKey: priv.Public(),
+	}
+	template := &x509.Certificate{
+		Subject: pkix.Name{
+			CommonName: "SSH key",
+		},
+		NotAfter:     time.Now().AddDate(42, 0, 0),
+		NotBefore:    time.Now(),
+		SerialNumber: randomSerialNumber(),
+		KeyUsage:     x509.KeyUsageKeyAgreement | x509.KeyUsageDigitalSignature,
+	}
+	certBytes, err := x509.CreateCertificate(rand.Reader, template, parent, pub, priv)
+	if err != nil {
+		log.Fatalln("Failed to generate certificate:", err)
+	}
+	cert, err := x509.ParseCertificate(certBytes)
+	if err != nil {
+		log.Fatalln("Failed to parse certificate:", err)
+	}
+	if err := yk.SetCertificate(key, piv.SlotAuthentication, cert); err != nil {
+		log.Fatalln("Failed to store certificate:", err)
+	}
+
+	sshKey, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		log.Fatalln("Failed to generate public key:", err)
+	}
+
+	fmt.Println("")
+	fmt.Println("✅ Done! This YubiKey is secured and ready to go.")
+	fmt.Println("🤏 When the YubiKey blinks, touch it to authorize the login.")
+	fmt.Println("")
+	fmt.Println("🔑 Here's your new shiny SSH public key:")
+	os.Stdout.Write(ssh.MarshalAuthorizedKey(sshKey))
+	fmt.Println("")
+	fmt.Println("Next steps: ensure yubikey-agent is running via launchd/systemd/...,")
+	fmt.Println(`set the SSH_AUTH_SOCK environment variable, and test with "ssh-add -L"`)
+	fmt.Println("")
+	fmt.Println("💭 Remember: everything breaks, have a backup plan for when this YubiKey does.")
+}
+
+func randomSerialNumber() *big.Int {
+	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+	if err != nil {
+		log.Fatalln("Failed to generate serial number:", err)
+	}
+	return serialNumber
+}
