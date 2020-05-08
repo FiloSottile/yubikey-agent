@@ -190,7 +190,11 @@ func (a *Agent) getPIN() (string, error) {
 	}
 	defer p.Close()
 	p.Set("title", "yubikey-agent PIN Prompt")
-	p.Set("desc", fmt.Sprintf("YubiKey serial number: %d", a.serial))
+	var retries string
+	if r, err := a.yk.Retries(); err == nil {
+		retries = fmt.Sprintf(" (%d tries remaining)", r)
+	}
+	p.Set("desc", fmt.Sprintf("YubiKey serial number: %d"+retries, a.serial))
 	p.Set("prompt", "Please enter your PIN:")
 	pin, err := p.GetPin()
 	return string(pin), err
