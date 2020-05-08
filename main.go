@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
@@ -223,11 +224,13 @@ func getPublicKey(yk *piv.YubiKey, slot piv.Slot) (ssh.PublicKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not get public key: %w", err)
 	}
-	pubKey, ok := cert.PublicKey.(*rsa.PublicKey)
-	if !ok {
+	switch cert.PublicKey.(type) {
+	case *ecdsa.PublicKey:
+	case *rsa.PublicKey:
+	default:
 		return nil, fmt.Errorf("unexpected public key type: %T", cert.PublicKey)
 	}
-	pk, err := ssh.NewPublicKey(pubKey)
+	pk, err := ssh.NewPublicKey(cert.PublicKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process public key: %w", err)
 	}
@@ -283,11 +286,11 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 		if !bytes.Equal(s.PublicKey().Marshal(), key.Marshal()) {
 			continue
 		}
-		alg := ssh.SigAlgoRSA
+		alg := key.Type()
 		switch {
-		case flags&agent.SignatureFlagRsaSha256 != 0:
+		case alg == ssh.KeyAlgoRSA && flags&agent.SignatureFlagRsaSha256 != 0:
 			alg = ssh.SigAlgoRSASHA2256
-		case flags&agent.SignatureFlagRsaSha512 != 0:
+		case alg == ssh.KeyAlgoRSA && flags&agent.SignatureFlagRsaSha512 != 0:
 			alg = ssh.SigAlgoRSASHA2512
 		}
 		// TODO: maybe retry if the PIN is not correct?
