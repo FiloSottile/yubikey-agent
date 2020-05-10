@@ -7,8 +7,8 @@
 class YubikeyAgent < Formula
   desc "Seamless ssh-agent for YubiKeys"
   homepage "https://filippo.io/yubikey-agent"
-  url "https://github.com/FiloSottile/yubikey-agent/archive/v0.1.0.zip"
-  sha256 "b38ec72023f96b08055f7b908b319a26487453e51731aed92a4ce1f7e71c01eb"
+  url "https://github.com/FiloSottile/yubikey-agent/archive/v0.1.1.zip"
+  sha256 "cffd7db3ecc38cbfaa4cabbca9b2ef3a694db1a8ea47afb63f47840fb0b5861b"
 
   depends_on "pinentry-mac"
   depends_on "go" => :build
