@@ -31,7 +31,9 @@ export SSH_AUTH_SOCK="/usr/local/var/run/yubikey-agent.sock"
 
 ### Linux
 
-`yubikey-agent` already works on Linux. Smooth installation instructions are coming soon.
+`yubikey-agent` already works on Linux. A simple installation process is coming soon.
+
+For a manual installation, you'll need Go, the [`piv-go` dependencies](https://github.com/go-piv/piv-go#installation), a `pinentry` program in PATH, and a [systemd unit](https://github.com/FiloSottile/yubikey-agent/blob/f8091cc4a330cc5c5960b9f8f8fe31531e4a8f18/systemd.md) or similar. Packaging contributions are very welcome.
 
 ### Windows
 
