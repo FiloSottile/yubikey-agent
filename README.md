@@ -29,7 +29,36 @@ Then add the following line to your `~/.zshrc` and restart the shell.
 export SSH_AUTH_SOCK="/usr/local/var/run/yubikey-agent.sock"
 ```
 
+### Linux
+
+`yubikey-agent` already works on Linux. Smooth installation instructions are coming soon.
+
+### Windows
+
+Windows support is currently WIP.
+
 ## Advanced topics
+
+### Coexisting with other `ssh-agent`s
+
+It's possible to configure `ssh-agent`s on a per-host basis.
+
+For example to only use `yubikey-agent` when connecting to `example.com`, you'd add the following lines to `~/.ssh/config` instead of setting `SSH_AUTH_SOCK`.
+
+```
+Host example.com
+    IdentityAgent /usr/local/var/run/yubikey-agent.sock
+```
+
+To use `yubikey-agent` for all hosts but one, you'd add the following lines.
+
+```
+Host *
+    IdentityAgent /usr/local/var/run/yubikey-agent.sock
+
+Host example.com
+    IdentityAgent $SSH_AUTH_SOCK
+```
 
 ### Conflicts with `gpg-agent` and Yubikey Manager
 
@@ -85,11 +114,9 @@ The UX of this solution is poor: it requires calling `ssh-add` to load the PKCS#
 
 The ssh-agent that ships with macOS (which is pretty cool, as it starts on demand and is preconfigured in the environment) also has restrictions on where the `.so` modules can be loaded from. It can see through symlinks, so a Homebrew-installed `/usr/local/lib/libykcs11.dylib` won't work, while a hard copy at `/usr/local/lib/libykcs11.copy.dylib` will.
 
-#### Secure Enclave
+#### SeKey
 
-On macOS systems with a Secure Enclave, it would make even more sense to generate the keys on there, use Touch ID for confirmation, and maybe even show the host being authenticated to on the Touch Bar.
-
-There is a project experimenting with that at [github.com/rolandshoemaker/sesa](https://github.com/rolandshoemaker/sesa), but unfortunately compiling software for the Secure Enclave requires specific entitlements from Apple, which complicates development.
+[SeKey](https://github.com/sekey/sekey) is a similar project that uses the Secure Enclave to store the private key and Touch ID for authorization.
 
 #### `pivy-agent`
 
