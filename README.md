@@ -9,6 +9,8 @@ yubikey-agent is a seamless ssh-agent for YubiKeys.
 
 Written in pure Go, it's based on [github.com/go-piv/piv-go](https://github.com/go-piv/piv-go) and [golang.org/x/crypto/ssh](https://golang.org/x/crypto/ssh).
 
+![carbon (7)](https://user-images.githubusercontent.com/1225294/81489747-63a03b00-9247-11ea-923a-b7434bcf7fd1.png)
+
 ## Installation
 
 ### macOS
