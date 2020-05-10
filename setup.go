@@ -75,11 +75,10 @@ func runSetup(yk *piv.YubiKey) {
 		log.Fatalln("Failed to access authentication slot:", err)
 	}
 
-	fmt.Println("🔐 The PIN is up to 8 numbers, letters, or symbols.")
-	fmt.Println("👆 You'll need it once per session.")
-	fmt.Println("❌ The YubiKey gets locked if the wrong PIN is entered 3 times.")
+	fmt.Println("🔐 The PIN is up to 8 numbers, letters, or symbols. Not just numbers!")
+	fmt.Println("❌ The key will be lost if the PIN and PUK are locked after 3 incorrect tries.")
 	fmt.Println("")
-	fmt.Print("Choose a new PIN: ")
+	fmt.Print("Choose a new PIN/PUK: ")
 	pin, err := terminal.ReadPassword(int(os.Stdin.Fd()))
 	fmt.Print("\n")
 	if err != nil {
@@ -88,7 +87,7 @@ func runSetup(yk *piv.YubiKey) {
 	if len(pin) == 0 || len(pin) > 8 {
 		log.Fatalln("The PIN needs to be 1-8 characters.")
 	}
-	fmt.Print("Repeat PIN: ")
+	fmt.Print("Repeat PIN/PUK: ")
 	repeat, err := terminal.ReadPassword(int(os.Stdin.Fd()))
 	fmt.Print("\n")
 	if err != nil {
