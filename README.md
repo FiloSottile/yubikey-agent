@@ -52,7 +52,7 @@ Host example.com
     IdentityAgent /usr/local/var/run/yubikey-agent.sock
 ```
 
-To use `yubikey-agent` for all hosts but one, you'd add the following lines.
+To use `yubikey-agent` for all hosts but one, you'd add the following lines instead. In both cases, you can keep using `ssh-add` to interact with the main `ssh-agent`.
 
 ```
 Host *
@@ -90,7 +90,7 @@ If the PUK is also entered incorrectly three times, the key is permanently irrec
 
 `yubikey-agent` only officially supports YubiKeys set up with `yubikey-agent -setup`.
 
-In practice, any PIV token with an RSA or ECDSA P-256 key and certificate in the Authentication slot should work, with any PIN and touch policy.
+In practice, any PIV token with an RSA or ECDSA P-256 key and certificate in the Authentication slot should work, with any PIN and touch policy. Simply skip the setup step and use `ssh-add -L` to view the public key.
 
 `yubikey-agent -setup` generates a random Management Key and [stores it in PIN-protected metadata](https://pkg.go.dev/github.com/go-piv/piv-go/piv?tab=doc#YubiKey.SetMetadata). Note that this is a different scheme from the `ykman` one, which enables PIN bruteforcing.
 
