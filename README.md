@@ -92,7 +92,7 @@ If the PUK is also entered incorrectly three times, the key is permanently irrec
 
 In practice, any PIV token with an RSA or ECDSA P-256 key and certificate in the Authentication slot should work, with any PIN and touch policy. Simply skip the setup step and use `ssh-add -L` to view the public key.
 
-`yubikey-agent -setup` generates a random Management Key and [stores it in PIN-protected metadata](https://pkg.go.dev/github.com/go-piv/piv-go/piv?tab=doc#YubiKey.SetMetadata). Note that this is a different scheme from the `ykman` one, which enables PIN bruteforcing.
+`yubikey-agent -setup` generates a random Management Key and [stores it in PIN-protected metadata](https://pkg.go.dev/github.com/go-piv/piv-go/piv?tab=doc#YubiKey.SetMetadata).
 
 ### Alternatives
 
