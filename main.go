@@ -116,7 +116,11 @@ func runAgent(socketPath string) {
 }
 
 type Agent struct {
-	mu     sync.Mutex
+	mu  sync.Mutex
+	yks map[string]yubikey
+}
+
+type yubikey struct {
 	yk     *piv.YubiKey
 	serial uint32
 }
@@ -136,87 +140,100 @@ func healthy(yk *piv.YubiKey) bool {
 	return err == nil
 }
 
-func (a *Agent) ensureYK() error {
-	if a.yk == nil || !healthy(a.yk) {
-		if a.yk != nil {
-			log.Println("Reconnecting to the YubiKey...")
-			a.yk.Close()
-		} else {
-			log.Println("Connecting to the YubiKey...")
-		}
-		yk, err := a.connectToYK()
-		if err != nil {
-			return err
-		}
-		a.yk = yk
+// ensureYkLocked ensures that all Yubikeys are healthy and discovers new
+// devices. It assumes the caller holds a.mu locked.
+func (a *Agent) ensureYkLocked() error {
+	if a.yks == nil {
+		a.yks = make(map[string]yubikey)
 	}
-	return nil
-}
-
-func (a *Agent) connectToYK() (*piv.YubiKey, error) {
+	// Check health of existing yubikeys
+	for card, yubikey := range a.yks {
+		if !healthy(yubikey.yk) {
+			log.Printf("Connection lost to YubiKey %d...", yubikey.serial)
+			yubikey.yk.Close()
+			delete(a.yks, card)
+		}
+	}
 	cards, err := piv.Cards()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if len(cards) == 0 {
-		return nil, errors.New("no YubiKey detected")
+		return errors.New("no YubiKey detected")
 	}
-	// TODO: support multiple YubiKeys.
-	yk, err := piv.Open(cards[0])
-	if err != nil {
-		return nil, err
+	for _, card := range cards {
+		if _, ok := a.yks[card]; ok {
+			continue
+		}
+		yk, err := piv.Open(card)
+		if err != nil {
+			log.Printf("Could not connect to Yubikey: %v", err)
+		}
+		// Cache the serial number locally because requesting it on older firmwares
+		// requires switching application, which drops the PIN cache.
+		serial, err := yk.Serial()
+		if err != nil {
+			log.Printf("Could not get serial from Yubikey %s, ignoring device", card)
+			continue
+		}
+		a.yks[card] = yubikey{yk, serial}
 	}
-	// Cache the serial number locally because requesting it on older firmwares
-	// requires switching application, which drops the PIN cache.
-	a.serial, _ = yk.Serial()
-	return yk, nil
+	return nil
 }
 
 func (a *Agent) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.yk != nil {
-		log.Println("Received SIGHUP, dropping YubiKey transaction...")
-		err := a.yk.Close()
-		a.yk = nil
+	log.Println("Received SIGHUP, dropping YubiKey transaction...")
+	for serial, yubikey := range a.yks {
+		err := yubikey.yk.Close()
+		delete(a.yks, serial)
 		return err
 	}
 	return nil
 }
 
-func (a *Agent) getPIN() (string, error) {
-	p, err := pinentry.New()
-	if err != nil {
-		return "", fmt.Errorf("failed to start %q: %w", pinentry.GetBinary(), err)
+// getPIN returns a pin prompt function for yubikey yk.
+func (a *Agent) getPIN(yubikey yubikey) func() (string, error) {
+	return func() (string, error) {
+		p, err := pinentry.New()
+		if err != nil {
+			return "", fmt.Errorf("failed to start %q: %w", pinentry.GetBinary(), err)
+		}
+		defer p.Close()
+		p.Set("title", "yubikey-agent PIN Prompt")
+		var retries string
+		if r, err := yubikey.yk.Retries(); err == nil {
+			retries = fmt.Sprintf(" (%d tries remaining)", r)
+		}
+		p.Set("desc", fmt.Sprintf("YubiKey serial number: %d"+retries, yubikey.serial))
+		p.Set("prompt", "Please enter your PIN:")
+		pin, err := p.GetPin()
+		return string(pin), err
 	}
-	defer p.Close()
-	p.Set("title", "yubikey-agent PIN Prompt")
-	var retries string
-	if r, err := a.yk.Retries(); err == nil {
-		retries = fmt.Sprintf(" (%d tries remaining)", r)
-	}
-	p.Set("desc", fmt.Sprintf("YubiKey serial number: %d"+retries, a.serial))
-	p.Set("prompt", "Please enter your PIN:")
-	pin, err := p.GetPin()
-	return string(pin), err
 }
 
 func (a *Agent) List() ([]*agent.Key, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if err := a.ensureYK(); err != nil {
+	if err := a.ensureYkLocked(); err != nil {
 		return nil, fmt.Errorf("could not reach YubiKey: %w", err)
 	}
 
-	pk, err := getPublicKey(a.yk, piv.SlotAuthentication)
-	if err != nil {
-		return nil, err
+	var keys []*agent.Key
+	for _, yubikey := range a.yks {
+		pk, err := getPublicKey(yubikey.yk, piv.SlotAuthentication)
+		if err != nil {
+			return nil, err
+		}
+		k := &agent.Key{
+			Format:  pk.Type(),
+			Blob:    pk.Marshal(),
+			Comment: fmt.Sprintf("YubiKey #%d PIV Slot 9a", yubikey.serial),
+		}
+		keys = append(keys, k)
 	}
-	return []*agent.Key{{
-		Format:  pk.Type(),
-		Blob:    pk.Marshal(),
-		Comment: fmt.Sprintf("YubiKey #%d PIV Slot 9a", a.serial),
-	}}, nil
+	return keys, nil
 }
 
 func getPublicKey(yk *piv.YubiKey, slot piv.Slot) (ssh.PublicKey, error) {
@@ -240,7 +257,7 @@ func getPublicKey(yk *piv.YubiKey, slot piv.Slot) (ssh.PublicKey, error) {
 func (a *Agent) Signers() ([]ssh.Signer, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if err := a.ensureYK(); err != nil {
+	if err := a.ensureYkLocked(); err != nil {
 		return nil, fmt.Errorf("could not reach YubiKey: %w", err)
 	}
 
@@ -248,23 +265,27 @@ func (a *Agent) Signers() ([]ssh.Signer, error) {
 }
 
 func (a *Agent) signers() ([]ssh.Signer, error) {
-	pk, err := getPublicKey(a.yk, piv.SlotAuthentication)
-	if err != nil {
-		return nil, err
+	var signers []ssh.Signer
+	for _, yubikey := range a.yks {
+		pk, err := getPublicKey(yubikey.yk, piv.SlotAuthentication)
+		if err != nil {
+			return nil, err
+		}
+		priv, err := yubikey.yk.PrivateKey(
+			piv.SlotAuthentication,
+			pk.(ssh.CryptoPublicKey).CryptoPublicKey(),
+			piv.KeyAuth{PINPrompt: a.getPIN(yubikey)},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare private key: %w", err)
+		}
+		s, err := ssh.NewSignerFromKey(priv)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare signer: %w", err)
+		}
+		signers = append(signers, s)
 	}
-	priv, err := a.yk.PrivateKey(
-		piv.SlotAuthentication,
-		pk.(ssh.CryptoPublicKey).CryptoPublicKey(),
-		piv.KeyAuth{PINPrompt: a.getPIN},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare private key: %w", err)
-	}
-	s, err := ssh.NewSignerFromKey(priv)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare signer: %w", err)
-	}
-	return []ssh.Signer{s}, nil
+	return signers, nil
 }
 
 func (a *Agent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
@@ -274,7 +295,7 @@ func (a *Agent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
 func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.SignatureFlags) (*ssh.Signature, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if err := a.ensureYK(); err != nil {
+	if err := a.ensureYkLocked(); err != nil {
 		return nil, fmt.Errorf("could not reach YubiKey: %w", err)
 	}
 
