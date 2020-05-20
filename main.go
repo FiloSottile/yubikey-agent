@@ -221,17 +221,25 @@ func (a *Agent) List() ([]*agent.Key, error) {
 	}
 
 	var keys []*agent.Key
+	slots := []piv.Slot{
+		piv.SlotAuthentication,
+		piv.SlotCardAuthentication,
+		piv.SlotKeyManagement,
+		piv.SlotSignature,
+	}
 	for _, yubikey := range a.yks {
-		pk, err := getPublicKey(yubikey.yk, piv.SlotAuthentication)
-		if err != nil {
-			return nil, err
+		for _, slot := range slots {
+			pk, err := getPublicKey(yubikey.yk, slot)
+			if err != nil {
+				continue
+			}
+			k := &agent.Key{
+				Format:  pk.Type(),
+				Blob:    pk.Marshal(),
+				Comment: fmt.Sprintf("YubiKey #%d PIV Slot %x", yubikey.serial, slot.Key),
+			}
+			keys = append(keys, k)
 		}
-		k := &agent.Key{
-			Format:  pk.Type(),
-			Blob:    pk.Marshal(),
-			Comment: fmt.Sprintf("YubiKey #%d PIV Slot 9a", yubikey.serial),
-		}
-		keys = append(keys, k)
 	}
 	return keys, nil
 }
@@ -265,25 +273,28 @@ func (a *Agent) Signers() ([]ssh.Signer, error) {
 }
 
 func (a *Agent) signers() ([]ssh.Signer, error) {
+	slots := []piv.Slot{piv.SlotAuthentication, piv.SlotKeyManagement}
 	var signers []ssh.Signer
 	for _, yubikey := range a.yks {
-		pk, err := getPublicKey(yubikey.yk, piv.SlotAuthentication)
-		if err != nil {
-			return nil, err
+		for _, slot := range slots {
+			pk, err := getPublicKey(yubikey.yk, slot)
+			if err != nil {
+				return nil, err
+			}
+			priv, err := yubikey.yk.PrivateKey(
+				slot,
+				pk.(ssh.CryptoPublicKey).CryptoPublicKey(),
+				piv.KeyAuth{PINPrompt: a.getPIN(yubikey)},
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to prepare private key: %w", err)
+			}
+			s, err := ssh.NewSignerFromKey(priv)
+			if err != nil {
+				return nil, fmt.Errorf("failed to prepare signer: %w", err)
+			}
+			signers = append(signers, s)
 		}
-		priv, err := yubikey.yk.PrivateKey(
-			piv.SlotAuthentication,
-			pk.(ssh.CryptoPublicKey).CryptoPublicKey(),
-			piv.KeyAuth{PINPrompt: a.getPIN(yubikey)},
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to prepare private key: %w", err)
-		}
-		s, err := ssh.NewSignerFromKey(priv)
-		if err != nil {
-			return nil, fmt.Errorf("failed to prepare signer: %w", err)
-		}
-		signers = append(signers, s)
 	}
 	return signers, nil
 }
