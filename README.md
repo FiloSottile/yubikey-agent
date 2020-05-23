@@ -55,11 +55,11 @@ Host example.com
 To use `yubikey-agent` for all hosts but one, you'd add the following lines instead. In both cases, you can keep using `ssh-add` to interact with the main `ssh-agent`.
 
 ```
-Host *
-    IdentityAgent /usr/local/var/run/yubikey-agent.sock
-
 Host example.com
     IdentityAgent $SSH_AUTH_SOCK
+
+Host *
+    IdentityAgent /usr/local/var/run/yubikey-agent.sock
 ```
 
 ### Conflicts with `gpg-agent` and Yubikey Manager
