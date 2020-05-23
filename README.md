@@ -18,7 +18,7 @@ Written in pure Go, it's based on [github.com/go-piv/piv-go](https://github.com/
 ```
 brew tap filippo.io/yubikey-agent https://filippo.io/yubikey-agent
 brew install yubikey-agent
-brew services start yubikey-agent # do NOT use sudo
+brew services start yubikey-agent
 
 yubikey-agent -setup # generate a new key on the YubiKey
 ```

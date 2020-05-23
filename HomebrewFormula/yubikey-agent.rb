@@ -26,9 +26,6 @@ class YubikeyAgent < Formula
     (var/"log").mkpath
   end
 
-  # TODO: figure out if we can avoid the suggested command including "sudo".
-  plist_options :startup => true
-
   def plist
     <<~EOS
       <?xml version="1.0" encoding="UTF-8"?>
