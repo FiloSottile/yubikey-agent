@@ -293,6 +293,9 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 		case alg == ssh.KeyAlgoRSA && flags&agent.SignatureFlagRsaSha512 != 0:
 			alg = ssh.SigAlgoRSASHA2512
 		}
+
+		notifyTouchRequired()
+
 		// TODO: maybe retry if the PIN is not correct?
 		return s.(ssh.AlgorithmSigner).SignWithAlgorithm(rand.Reader, data, alg)
 	}
@@ -319,4 +322,13 @@ func (a *Agent) Lock(passphrase []byte) error {
 }
 func (a *Agent) Unlock(passphrase []byte) error {
 	return ErrOperationUnsupported
+}
+
+func notifyTouchRequired() {
+
+	if _, err := exec.LookPath("notify-send"); err == nil {
+		cmd := exec.Command("notify-send", "-a", "yubikey-agent", "-i", "dialog-password", "Touch required", "Please touch your Yubikey for SSH")
+		cmd.Run()
+	}
+
 }
