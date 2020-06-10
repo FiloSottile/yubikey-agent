@@ -123,6 +123,9 @@ type Agent struct {
 type yubikey struct {
 	yk     *piv.YubiKey
 	serial uint32
+
+	// publicKeys caches the SSH public keys for speed.
+	signers []ssh.Signer
 }
 
 var _ agent.ExtendedAgent = &Agent{}
@@ -184,7 +187,12 @@ func (a *Agent) ensureYkLocked() error {
 			log.Printf("Could not get serial from Yubikey %s, ignoring device", card)
 			continue
 		}
-		a.yks[card] = yubikey{yk, serial}
+
+		signers, err := signers(yk, serial)
+		if err != nil {
+			log.Printf("Could not get public keys from Yubikey %s, ignoring device", card)
+		}
+		a.yks[card] = yubikey{yk: yk, serial: serial, signers: signers}
 	}
 	return nil
 }
@@ -201,8 +209,8 @@ func (a *Agent) Close() error {
 	return nil
 }
 
-// getPIN returns a pin prompt function for yubikey yk.
-func (a *Agent) getPIN(yubikey yubikey) func() (string, error) {
+// getPINPrompt returns a pin prompt function for yubikey yk.
+func getPINPrompt(yk *piv.YubiKey, serial uint32) func() (string, error) {
 	return func() (string, error) {
 		p, err := pinentry.New()
 		if err != nil {
@@ -211,10 +219,10 @@ func (a *Agent) getPIN(yubikey yubikey) func() (string, error) {
 		defer p.Close()
 		p.Set("title", "yubikey-agent PIN Prompt")
 		var retries string
-		if r, err := yubikey.yk.Retries(); err == nil {
+		if r, err := yk.Retries(); err == nil {
 			retries = fmt.Sprintf(" (%d tries remaining)", r)
 		}
-		p.Set("desc", fmt.Sprintf("YubiKey serial number: %d"+retries, yubikey.serial))
+		p.Set("desc", fmt.Sprintf("YubiKey serial number: %d"+retries, serial))
 		p.Set("prompt", "Please enter your PIN:")
 		pin, err := p.GetPin()
 		return string(pin), err
@@ -284,40 +292,40 @@ func (a *Agent) Signers() ([]ssh.Signer, error) {
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if err := a.ensureYkLocked(); err != nil {
-		return nil, fmt.Errorf("could not reach YubiKey: %w", err)
+	var signers []ssh.Signer
+	for _, yk := range a.yks {
+		signers = append(signers, yk.signers...)
 	}
-
-	return a.signers()
+	return signers, nil
 }
 
-func (a *Agent) signers() ([]ssh.Signer, error) {
+func signers(yk *piv.YubiKey, serial uint32) ([]ssh.Signer, error) {
 	defer func(start time.Time) {
 		log.Printf("signers: %v", time.Since(start))
 	}(time.Now())
+
 	slots := []piv.Slot{piv.SlotAuthentication, piv.SlotKeyManagement}
 	var signers []ssh.Signer
-	for _, yubikey := range a.yks {
-		for _, slot := range slots {
-			pk, err := getPublicKey(yubikey.yk, slot)
-			if err != nil {
-				return nil, err
-			}
-			priv, err := yubikey.yk.PrivateKey(
-				slot,
-				pk.(ssh.CryptoPublicKey).CryptoPublicKey(),
-				piv.KeyAuth{PINPrompt: a.getPIN(yubikey)},
-			)
-			if err != nil {
-				return nil, fmt.Errorf("failed to prepare private key: %w", err)
-			}
-			s, err := ssh.NewSignerFromKey(priv)
-			if err != nil {
-				return nil, fmt.Errorf("failed to prepare signer: %w", err)
-			}
-			signers = append(signers, s)
+	for _, slot := range slots {
+		pk, err := getPublicKey(yk, slot)
+		if err != nil {
+			return nil, err
 		}
+		priv, err := yk.PrivateKey(
+			slot,
+			pk.(ssh.CryptoPublicKey).CryptoPublicKey(),
+			piv.KeyAuth{PINPrompt: getPINPrompt(yk, serial)},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare private key: %w", err)
+		}
+		s, err := ssh.NewSignerFromKey(priv)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare signer: %w", err)
+		}
+		signers = append(signers, s)
 	}
+
 	return signers, nil
 }
 
@@ -336,23 +344,21 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 		return nil, fmt.Errorf("could not reach YubiKey: %w", err)
 	}
 
-	signers, err := a.signers()
-	if err != nil {
-		return nil, err
-	}
-	for _, s := range signers {
-		if !bytes.Equal(s.PublicKey().Marshal(), key.Marshal()) {
-			continue
+	for _, yk := range a.yks {
+		for _, s := range yk.signers {
+			if !bytes.Equal(s.PublicKey().Marshal(), key.Marshal()) {
+				continue
+			}
+			alg := key.Type()
+			switch {
+			case alg == ssh.KeyAlgoRSA && flags&agent.SignatureFlagRsaSha256 != 0:
+				alg = ssh.SigAlgoRSASHA2256
+			case alg == ssh.KeyAlgoRSA && flags&agent.SignatureFlagRsaSha512 != 0:
+				alg = ssh.SigAlgoRSASHA2512
+			}
+			// TODO: maybe retry if the PIN is not correct?
+			return s.(ssh.AlgorithmSigner).SignWithAlgorithm(rand.Reader, data, alg)
 		}
-		alg := key.Type()
-		switch {
-		case alg == ssh.KeyAlgoRSA && flags&agent.SignatureFlagRsaSha256 != 0:
-			alg = ssh.SigAlgoRSASHA2256
-		case alg == ssh.KeyAlgoRSA && flags&agent.SignatureFlagRsaSha512 != 0:
-			alg = ssh.SigAlgoRSASHA2512
-		}
-		// TODO: maybe retry if the PIN is not correct?
-		return s.(ssh.AlgorithmSigner).SignWithAlgorithm(rand.Reader, data, alg)
 	}
 	return nil, fmt.Errorf("no private keys match the requested public key")
 }
