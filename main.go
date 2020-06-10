@@ -241,12 +241,6 @@ func (a *Agent) List() ([]*agent.Key, error) {
 	}
 
 	var keys []*agent.Key
-	slots := []piv.Slot{
-		piv.SlotAuthentication,
-		piv.SlotCardAuthentication,
-		piv.SlotKeyManagement,
-		piv.SlotSignature,
-	}
 	for _, yubikey := range a.yks {
 		for _, slot := range slots {
 			pk, err := getPublicKey(yubikey.yk, slot)
@@ -299,17 +293,23 @@ func (a *Agent) Signers() ([]ssh.Signer, error) {
 	return signers, nil
 }
 
+var slots = []piv.Slot{
+	piv.SlotAuthentication,
+	piv.SlotCardAuthentication,
+	piv.SlotKeyManagement,
+	piv.SlotSignature,
+}
+
 func signers(yk *piv.YubiKey, serial uint32) ([]ssh.Signer, error) {
 	defer func(start time.Time) {
 		log.Printf("signers: %v", time.Since(start))
 	}(time.Now())
 
-	slots := []piv.Slot{piv.SlotAuthentication, piv.SlotKeyManagement}
 	var signers []ssh.Signer
 	for _, slot := range slots {
 		pk, err := getPublicKey(yk, slot)
 		if err != nil {
-			return nil, err
+			continue
 		}
 		priv, err := yk.PrivateKey(
 			slot,
