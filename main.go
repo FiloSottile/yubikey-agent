@@ -32,7 +32,7 @@ import (
 )
 
 func main() {
-	log.SetFlags(log.Llongfile | log.Ltime | log.Lmicroseconds)
+	log.SetFlags(0)
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of yubikey-agent:\n")
 		fmt.Fprintf(os.Stderr, "\n")
@@ -137,10 +137,6 @@ func (a *Agent) serveConn(c net.Conn) {
 }
 
 func healthy(yk *piv.YubiKey) bool {
-	defer func(start time.Time) {
-		log.Printf("healthy: %v", time.Since(start))
-	}(time.Now())
-
 	// We can't use Serial because it locks the session on older firmwares, and
 	// can't use Retries because it fails when the session is unlocked.
 	_, err := yk.AttestationCertificate()
@@ -150,10 +146,6 @@ func healthy(yk *piv.YubiKey) bool {
 // ensureYkLocked ensures that all Yubikeys are healthy and discovers new
 // devices. It assumes the caller holds a.mu locked.
 func (a *Agent) ensureYkLocked() error {
-	defer func(start time.Time) {
-		log.Printf("ensureYkLocked: %v", time.Since(start))
-	}(time.Now())
-
 	if a.yks == nil {
 		a.yks = make(map[string]yubikey)
 	}
@@ -230,10 +222,6 @@ func getPINPrompt(yk *piv.YubiKey, serial uint32) func() (string, error) {
 }
 
 func (a *Agent) List() ([]*agent.Key, error) {
-	defer func(start time.Time) {
-		log.Printf("List: %v", time.Since(start))
-	}(time.Now())
-
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if err := a.ensureYkLocked(); err != nil {
@@ -259,9 +247,6 @@ func (a *Agent) List() ([]*agent.Key, error) {
 }
 
 func getPublicKey(yk *piv.YubiKey, slot piv.Slot) (ssh.PublicKey, error) {
-	defer func(start time.Time) {
-		log.Printf("getPublicKey: %v", time.Since(start))
-	}(time.Now())
 	cert, err := yk.Certificate(slot)
 	if err != nil {
 		return nil, fmt.Errorf("could not get public key: %w", err)
@@ -280,10 +265,6 @@ func getPublicKey(yk *piv.YubiKey, slot piv.Slot) (ssh.PublicKey, error) {
 }
 
 func (a *Agent) Signers() ([]ssh.Signer, error) {
-	defer func(start time.Time) {
-		log.Printf("Signers: %v", time.Since(start))
-	}(time.Now())
-
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	var signers []ssh.Signer
@@ -301,10 +282,6 @@ var slots = []piv.Slot{
 }
 
 func signers(yk *piv.YubiKey, serial uint32) ([]ssh.Signer, error) {
-	defer func(start time.Time) {
-		log.Printf("signers: %v", time.Since(start))
-	}(time.Now())
-
 	var signers []ssh.Signer
 	for _, slot := range slots {
 		pk, err := getPublicKey(yk, slot)
@@ -334,10 +311,6 @@ func (a *Agent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
 }
 
 func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.SignatureFlags) (*ssh.Signature, error) {
-	defer func(start time.Time) {
-		log.Printf("SignWithFlags: %v", time.Since(start))
-	}(time.Now())
-
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if err := a.ensureYkLocked(); err != nil {
