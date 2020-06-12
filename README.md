@@ -31,9 +31,22 @@ export SSH_AUTH_SOCK="/usr/local/var/run/yubikey-agent.sock"
 
 ### Linux
 
-`yubikey-agent` already works on Linux. A simple installation process is coming soon.
+For a manual installation, you'll need Go, the [`piv-go` dependencies](https://github.com/go-piv/piv-go#installation), and a `pinentry` program in PATH. A systemd unit is provided to launch yubikey-agent on login (tested on Ubuntu 20.04).
 
-For a manual installation, you'll need Go, the [`piv-go` dependencies](https://github.com/go-piv/piv-go#installation), a `pinentry` program in PATH, and a [systemd unit](https://github.com/FiloSottile/yubikey-agent/blob/f8091cc4a330cc5c5960b9f8f8fe31531e4a8f18/systemd.md) or similar. Packaging contributions are very welcome.
+```
+go get filippo.io/yubikey-agent
+go install filippo.io/yubikey-agent
+sudo cp $GOPATH/bin/yubikey-agent /usr/local/bin/
+sudo cp $GOPATH/src/filippo.io/yubikey-agent/linux/yubikey-agent-launch /usr/local/bin/
+sudo cp $GOPATH/src/filippo.io/yubikey-agent/linux/yubikey-agent.service /usr/lib/systemd/user/
+sudo ln -s ../yubikey-agent.service /usr/lib/systemd/user/graphical-session-pre.target.wants/yubikey-agent.service
+# Note: This disables ssh-agent so yubikey-agent-launch can reliably set
+# SSH_AUTH_SOCK. If you'd like to use both, just append use-yubikey-agent
+# to this file. You'll need to manually configure IdentityAgent (see below)
+sudo sed -i 's/use-ssh-agent/use-yubikey-agent/' /etc/X11/Xsession.options
+```
+
+Log out and log back in again.
 
 ### Windows
 

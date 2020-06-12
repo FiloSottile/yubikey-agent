@@ -1,0 +1,11 @@
+[Unit]
+Description=yubikey-agent
+Documentation=https://github.com/FiloSottile/yubikey-agent
+Before=graphical-session-pre.target
+ConditionPathExists=/etc/X11/Xsession.options
+Wants=dbus.socket
+After=dbus.socket
+
+[Service]
+ExecStart=/usr/local/bin/yubikey-agent-launch start
+ExecStopPost=/usr/local/bin/yubikey-agent-launch stop

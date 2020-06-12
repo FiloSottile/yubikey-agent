@@ -1,0 +1,24 @@
+#!/bin/sh
+# helper script for launching yubikey-agent, used by systemd unit
+# adapted from the Ubuntu openssh-client package.
+set -e
+
+if [ ! -d "$XDG_RUNTIME_DIR" ]; then
+    echo 'This needs $XDG_RUNTIME_DIR to be set' >&2
+    exit 1
+fi
+
+if [ "$1" = start ]; then
+    if [ -z "$SSH_AUTH_SOCK" ] && grep -s -q '^use-yubikey-agent$' /etc/X11/Xsession.options; then
+        S="$XDG_RUNTIME_DIR/yubikey_agent"
+        dbus-update-activation-environment --verbose --systemd SSH_AUTH_SOCK=$S SSH_AGENT_LAUNCHER=yubikey-agent
+        exec yubikey-agent -l $S
+    fi
+elif [ "$1" = stop ]; then
+    if [ "$SSH_AGENT_LAUNCHER" = yubikey-agent ]; then
+        dbus-update-activation-environment --systemd  SSH_AUTH_SOCK=
+    fi
+else
+    echo "Unknown command $1" >&2
+    exit 1
+fi
