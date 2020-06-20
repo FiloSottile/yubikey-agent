@@ -32,7 +32,6 @@ import (
 )
 
 func main() {
-	log.SetFlags(0)
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of yubikey-agent:\n")
 		fmt.Fprintf(os.Stderr, "\n")
@@ -57,6 +56,7 @@ func main() {
 	}
 
 	if *setupFlag {
+		log.SetFlags(0)
 		yk := connectForSetup()
 		if *resetFlag {
 			runReset(yk)
