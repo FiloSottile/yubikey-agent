@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -93,6 +94,9 @@ func runAgent(socketPath string) {
 	}()
 
 	os.Remove(socketPath)
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0777); err != nil {
+		log.Fatalln("Failed to create UNIX socket folder:", err)
+	}
 	l, err := net.Listen("unix", socketPath)
 	if err != nil {
 		log.Fatalln("Failed to listen on UNIX socket:", err)
