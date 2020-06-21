@@ -51,8 +51,8 @@ Then refresh systemd daemon configuration, make sure that PC/SC daemon is availa
 
 ```text
 $ systemctl daemon-reload --user
-$ sudo systemctl start pcscd.socket
-$ systemctl --user start yubikey-agent
+$ sudo systemctl enable --now pcscd.socket
+$ systemctl --user enable --now yubikey-agent
 ```
 
 The path of the SSH auth sock is `${XDG_RUNTIME_DIR}/yubikey-agent/yubikey-agent.sock`.
