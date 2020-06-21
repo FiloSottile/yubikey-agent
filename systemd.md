@@ -1,13 +1,21 @@
 # Manual Linux setup with systemd
 
-Build `yubikey-agent` and place it in `$PATH`.
+First, install Go and the [`piv-go` dependencies](https://github.com/go-piv/piv-go#installation), build `yubikey-agent` and place it in `$PATH`.
 
 ```text
-$ go install filippo.io/yubikey-agent
-$ sudo cp $GOPATH/bin/yubikey-agent /usr/local/bin/
+$ git clone https://filippo.io/yubikey-agent && cd yubikey-agent
+$ go build && sudo cp yubikey-agent /usr/local/bin/
 ```
 
-Now create a systemd user service `~/.config/systemd/user/yubikey-agent.service` with the following content:
+Make sure you have a `pinentry` program that works for you (terminal-based or graphical) in `$PATH`.
+
+Use `yubikey-agent -setup` to create a new key on the YubiKey.
+
+```text
+$ yubikey-agent -setup
+```
+
+Then, create a systemd user service at `~/.config/systemd/user/yubikey-agent.service`.
 
 ```systemd
 [Unit]
@@ -47,7 +55,7 @@ RuntimeDirectory=yubikey-agent
 WantedBy=multi-user.target
 ```
 
-Then refresh systemd daemon configuration, make sure that PC/SC daemon is available and start the yubikey-agent:
+Refresh systemd, make sure that the PC/SC daemon is available, and start the yubikey-agent.
 
 ```text
 $ systemctl daemon-reload --user
@@ -55,4 +63,8 @@ $ sudo systemctl enable --now pcscd.socket
 $ systemctl --user enable --now yubikey-agent
 ```
 
-The path of the SSH auth sock is `${XDG_RUNTIME_DIR}/yubikey-agent/yubikey-agent.sock`.
+Finally, add the following line to your shell profile and restart it.
+
+```
+export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/yubikey-agent/yubikey-agent.sock"
+```

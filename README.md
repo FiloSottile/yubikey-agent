@@ -31,9 +31,22 @@ export SSH_AUTH_SOCK="/usr/local/var/run/yubikey-agent.sock"
 
 ### Linux
 
-`yubikey-agent` already works on Linux. A simple installation process is coming soon.
+On Arch, use [the `yubikey-agent` package](https://aur.archlinux.org/packages/yubikey-agent/) from the AUR.
 
-For a manual installation, you'll need Go, the [`piv-go` dependencies](https://github.com/go-piv/piv-go#installation), a `pinentry` program in PATH, and a [systemd unit](https://github.com/FiloSottile/yubikey-agent/blob/f8091cc4a330cc5c5960b9f8f8fe31531e4a8f18/systemd.md) or similar. Packaging contributions are very welcome.
+```
+git clone https://aur.archlinux.org/yubikey-agent.git
+cd yubikey-agent && makepkg -si
+
+systemctl daemon-reload --user
+sudo systemctl enable --now pcscd.socket
+systemctl --user enable --now yubikey-agent
+
+export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/yubikey-agent/yubikey-agent.sock"
+```
+
+On other systemd-based Linux systems, follow [the manual installation instructions](systemd.md).
+
+Packaging contributions are very welcome.
 
 ### Windows
 
