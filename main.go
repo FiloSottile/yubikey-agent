@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/rsa"
@@ -21,6 +22,8 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -123,6 +126,11 @@ type Agent struct {
 	mu     sync.Mutex
 	yk     *piv.YubiKey
 	serial uint32
+
+	// touchNotification is armed by Sign to show a notification if waiting for
+	// more than a few seconds for the touch operation. It is paused and reset
+	// by getPIN so it won't fire while waiting for the PIN.
+	touchNotification *time.Timer
 }
 
 var _ agent.ExtendedAgent = &Agent{}
@@ -189,6 +197,9 @@ func (a *Agent) Close() error {
 }
 
 func (a *Agent) getPIN() (string, error) {
+	if a.touchNotification != nil && a.touchNotification.Stop() {
+		defer a.touchNotification.Reset(5 * time.Second)
+	}
 	p, err := pinentry.New()
 	if err != nil {
 		return "", fmt.Errorf("failed to start %q: %w", pinentry.GetBinary(), err)
@@ -290,6 +301,20 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 		if !bytes.Equal(s.PublicKey().Marshal(), key.Marshal()) {
 			continue
 		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		a.touchNotification = time.NewTimer(5 * time.Second)
+		go func() {
+			select {
+			case <-a.touchNotification.C:
+			case <-ctx.Done():
+				a.touchNotification.Stop()
+				return
+			}
+			showNotification("Waiting for YubiKey touch...")
+		}()
+
 		alg := key.Type()
 		switch {
 		case alg == ssh.KeyAlgoRSA && flags&agent.SignatureFlagRsaSha256 != 0:
@@ -301,6 +326,18 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 		return s.(ssh.AlgorithmSigner).SignWithAlgorithm(rand.Reader, data, alg)
 	}
 	return nil, fmt.Errorf("no private keys match the requested public key")
+}
+
+func showNotification(message string) {
+	switch runtime.GOOS {
+	case "darwin":
+		message = strings.ReplaceAll(message, `\`, `\\`)
+		message = strings.ReplaceAll(message, `"`, `\"`)
+		appleScript := `display notification "%s" with title "yubikey-agent"`
+		exec.Command("osascript", "-e", fmt.Sprintf(appleScript, message)).Run()
+	case "linux":
+		exec.Command("notify-send", "-i", "dialog-password", "yubikey-agent", message).Run()
+	}
 }
 
 func (a *Agent) Extension(extensionType string, contents []byte) ([]byte, error) {
