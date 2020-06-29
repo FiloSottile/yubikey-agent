@@ -52,7 +52,7 @@ UMask=0177
 RuntimeDirectory=yubikey-agent
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 ```
 
 Refresh systemd, make sure that the PC/SC daemon is available, and start the yubikey-agent.
