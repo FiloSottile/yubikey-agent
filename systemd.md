@@ -1,5 +1,10 @@
 # Manual Linux setup with systemd
 
+Note: this is usually only necessary in case your distribution doesn't already
+provide a yubikey-agent as a package.
+
+Refer to [the README](README) for a list of distributions providing packages.
+
 First, install Go and the [`piv-go` dependencies](https://github.com/go-piv/piv-go#installation), build `yubikey-agent` and place it in `$PATH`.
 
 ```text
@@ -15,45 +20,12 @@ Use `yubikey-agent -setup` to create a new key on the YubiKey.
 $ yubikey-agent -setup
 ```
 
-Then, create a systemd user service at `~/.config/systemd/user/yubikey-agent.service`.
+Then, create a systemd user service at `~/.config/systemd/user/yubikey-agent.service`
+with the contents of [yubikey-agent.service](contrib/systemd/user/yubikey-agent.service).
 
-```systemd
-[Unit]
-Description=Seamless ssh-agent for YubiKeys
-Documentation=https://filippo.io/yubikey-agent
-
-[Service]
-ExecStart=/usr/local/bin/yubikey-agent -l %t/yubikey-agent/yubikey-agent.sock
-ExecReload=/bin/kill -HUP $MAINPID
-ProtectSystem=strict
-ProtectKernelLogs=yes
-ProtectKernelModules=yes
-ProtectKernelTunables=yes
-ProtectControlGroups=yes
-ProtectClock=yes
-ProtectHostname=yes
-PrivateTmp=yes
-PrivateDevices=yes
-PrivateUsers=yes
-IPAddressDeny=any
-RestrictAddressFamilies=AF_UNIX
-RestrictNamespaces=yes
-RestrictRealtime=yes
-RestrictSUIDSGID=yes
-LockPersonality=yes
-CapabilityBoundingSet=
-SystemCallFilter=@system-service
-SystemCallFilter=~@privileged @resources
-SystemCallErrorNumber=EPERM
-SystemCallArchitectures=native
-NoNewPrivileges=yes
-KeyringMode=private
-UMask=0177
-RuntimeDirectory=yubikey-agent
-
-[Install]
-WantedBy=default.target
-```
+Depending on your distribution (`systemd <=239` or no user namespace support),
+you might need to edit the `ExecStart=` line and some of the sandboxing
+options.
 
 Refresh systemd, make sure that the PC/SC daemon is available, and start the yubikey-agent.
 
