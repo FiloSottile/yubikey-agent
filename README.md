@@ -123,11 +123,13 @@ This requires a finicky setup process dealing with PGP keys and the `gpg` UX, an
 
 #### `ssh-agent` and PKCS#11
 
-`ssh-agent` can load PKCS#11 applets to interact with PIV tokens directly. There are two PKCS#11 providers for YubiKeys: OpenSC and ykcs11.
+`ssh-agent` can load PKCS#11 applets to interact with PIV tokens directly. There are two third-party PKCS#11 providers for YubiKeys (OpenSC and ykcs11) and one that ships with macOS (`man 8 ssh-keychain`).
 
 The UX of this solution is poor: it requires calling `ssh-add` to load the PKCS#11 module and to unlock it with the PIN (as the agent has no way of requesting input from the client during use, a limitation that `yubikey-agent` handles with `pinentry`), and needs manual reloading every time the YubiKey is unplugged or the machine goes to sleep.
 
 The ssh-agent that ships with macOS (which is pretty cool, as it starts on demand and is preconfigured in the environment) also has restrictions on where the `.so` modules can be loaded from. It can see through symlinks, so a Homebrew-installed `/usr/local/lib/libykcs11.dylib` won't work, while a hard copy at `/usr/local/lib/libykcs11.copy.dylib` will.
+
+`/usr/lib/ssh-keychain.dylib` works out of the box, but only with RSA keys. Key generation is undocumented.
 
 #### SeKey
 
