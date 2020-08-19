@@ -31,6 +31,8 @@ export SSH_AUTH_SOCK="/usr/local/var/run/yubikey-agent.sock"
 
 ### Linux
 
+#### Arch
+
 On Arch, use [the `yubikey-agent` package](https://aur.archlinux.org/packages/yubikey-agent/) from the AUR.
 
 ```
@@ -43,6 +45,29 @@ systemctl --user enable --now yubikey-agent
 
 export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/yubikey-agent/yubikey-agent.sock"
 ```
+
+#### NixOS / nixpkgs
+
+On NixOS unstable and 20.09 (unreleased at time of writing), you can
+add this to your `/etc/nixos/configuration.nix`:
+
+```
+services.yubikey-agent.enable = true;
+```
+
+This installs `yubikey-agent` and sets up a systemd unit to start
+yubikey-agent for you.
+
+On other systems using nix, you can also install from nixpkgs:
+
+```
+nix-env -iA nixpkgs.yubikey-agent
+```
+
+This installs the software but does *not* install a systemd unit.  You
+will have to set up service management manually (see below).
+
+#### Other systemd-based Linux systems
 
 On other systemd-based Linux systems, follow [the manual installation instructions](systemd.md).
 
