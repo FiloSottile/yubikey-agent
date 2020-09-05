@@ -48,6 +48,10 @@ On other systemd-based Linux systems, follow [the manual installation instructio
 
 Packaging contributions are very welcome.
 
+### FreeBSD
+
+Install the [`yubikey-agent` port](https://svnweb.freebsd.org/ports/head/security/yubikey-agent/).
+
 ### Windows
 
 Windows support is currently WIP.
