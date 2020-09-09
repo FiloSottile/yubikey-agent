@@ -43,23 +43,22 @@ func init() {
 	Version = "(unknown version)"
 }
 
-func connectForSetup() *piv.YubiKey {
+func getYK() (*piv.YubiKey, error) {
 	cards, err := piv.Cards()
 	if err != nil {
-		log.Fatalln("Failed to enumerate tokens:", err)
+		return nil, fmt.Errorf("failed to enumerate tokens: %w", err)
 	}
 	// TODO: support multiple YubiKeys.
 	for _, card := range cards {
 		if strings.Contains(strings.ToLower(card), "yubikey") {
 			yk, err := piv.Open(card)
 			if err != nil {
-				log.Fatalln("Failed to connect to the YubiKey:", err)
+				return nil, fmt.Errorf("failed to connect to the YubiKey: %w", err)
 			}
-			return yk
+			return yk, nil
 		}
 	}
-	log.Fatalln("No YubiKeys detected!")
-	return nil
+	return nil, fmt.Errorf("no YubiKeys detected")
 }
 
 func runReset(yk *piv.YubiKey) {

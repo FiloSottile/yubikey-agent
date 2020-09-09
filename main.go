@@ -61,7 +61,10 @@ func main() {
 
 	if *setupFlag {
 		log.SetFlags(0)
-		yk := connectForSetup()
+		yk, err := getYK()
+		if err != nil {
+			log.Fatalln(err)
+		}
 		if *resetFlag {
 			runReset(yk)
 		}
@@ -156,32 +159,17 @@ func (a *Agent) ensureYK() error {
 		} else {
 			log.Println("Connecting to the YubiKey...")
 		}
-		yk, err := a.connectToYK()
-		if err != nil {
+		var err error
+		if a.yk, err = getYK(); err != nil {
 			return err
 		}
-		a.yk = yk
+		// Cache the serial number locally because requesting it on older firmwares
+		// requires switching application, which drops the PIN cache.
+		if a.serial, err = a.yk.Serial(); err != nil {
+			return err
+		}
 	}
 	return nil
-}
-
-func (a *Agent) connectToYK() (*piv.YubiKey, error) {
-	cards, err := piv.Cards()
-	if err != nil {
-		return nil, err
-	}
-	if len(cards) == 0 {
-		return nil, errors.New("no YubiKey detected")
-	}
-	// TODO: support multiple YubiKeys.
-	yk, err := piv.Open(cards[0])
-	if err != nil {
-		return nil, err
-	}
-	// Cache the serial number locally because requesting it on older firmwares
-	// requires switching application, which drops the PIN cache.
-	a.serial, _ = yk.Serial()
-	return yk, nil
 }
 
 func (a *Agent) Close() error {
