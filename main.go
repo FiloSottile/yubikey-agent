@@ -152,22 +152,23 @@ func healthy(yk *piv.YubiKey) bool {
 }
 
 func (a *Agent) ensureYK() error {
-	if a.yk == nil || !healthy(a.yk) {
-		if a.yk != nil {
-			log.Println("Reconnecting to the YubiKey...")
-			a.yk.Close()
-		} else {
-			log.Println("Connecting to the YubiKey...")
-		}
-		var err error
-		if a.yk, err = getYK(); err != nil {
-			return err
-		}
-		// Cache the serial number locally because requesting it on older firmwares
-		// requires switching application, which drops the PIN cache.
-		if a.serial, err = a.yk.Serial(); err != nil {
-			return err
-		}
+	if a.yk != nil && healthy(a.yk) {
+		return nil
+	}
+	if a.yk != nil {
+		log.Println("Reconnecting to the YubiKey...")
+		a.yk.Close()
+	} else {
+		log.Println("Connecting to the YubiKey...")
+	}
+	var err error
+	if a.yk, err = getYK(); err != nil {
+		return err
+	}
+	// Cache the serial number locally because requesting it on older firmwares
+	// requires switching application, which drops the PIN cache.
+	if a.serial, err = a.yk.Serial(); err != nil {
+		return err
 	}
 	return nil
 }
