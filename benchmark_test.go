@@ -15,23 +15,15 @@ var slotBenchmarkCases = []struct {
 	slots []piv.Slot
 }{
 	{
-		name: "1 slot",
+		name: "1 slot 9a",
 		slots: []piv.Slot{
 			piv.SlotAuthentication,
-		},
-	},
-
-	{
-		name: "2 slots both exist",
-		slots: []piv.Slot{
-			piv.SlotAuthentication,
-			piv.SlotKeyManagement,
 		},
 	},
 
 	// This assumes there are certificates on slots 9A and 9D only.
 	{
-		name: "2 slots 1 exist",
+		name: "2 slots 9a 9e",
 		slots: []piv.Slot{
 			piv.SlotAuthentication,
 			piv.SlotCardAuthentication,
@@ -39,7 +31,15 @@ var slotBenchmarkCases = []struct {
 	},
 
 	{
-		name: "4 slots",
+		name: "2 slots 9a 9d",
+		slots: []piv.Slot{
+			piv.SlotAuthentication,
+			piv.SlotKeyManagement,
+		},
+	},
+
+	{
+		name: "4 slots 9a 9e 9d 9c",
 		slots: []piv.Slot{
 			piv.SlotAuthentication,
 			piv.SlotCardAuthentication,
