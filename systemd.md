@@ -20,7 +20,7 @@ sudo apt install -y pcscd libpcsclite-dev
 
 ### `pcscd.socket`
 
-Make sure `pcsdc.socket is active before using `yubikey-agent`.
+Make sure `pcsdc.socket` is active before using `yubikey-agent`.
 
 ```sh
 $ systemctl is-active pcscd.socket
