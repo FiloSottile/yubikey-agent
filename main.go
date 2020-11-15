@@ -299,39 +299,52 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 		return nil, fmt.Errorf("could not reach YubiKey: %w", err)
 	}
 
-	signers, err := a.signers()
-	if err != nil {
-		return nil, err
-	}
-	for _, s := range signers {
-		if !bytes.Equal(s.PublicKey().Marshal(), key.Marshal()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.touchNotification = time.NewTimer(5 * time.Second)
+	go func() {
+		select {
+		case <-a.touchNotification.C:
+		case <-ctx.Done():
+			a.touchNotification.Stop()
+			return
+		}
+		showNotification("Waiting for YubiKey touch...")
+	}()
+
+	for {
+		signers, err := a.signers()
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range signers {
+			if !bytes.Equal(s.PublicKey().Marshal(), key.Marshal()) {
+				continue
+			}
+
+			alg := key.Type()
+			switch {
+			case alg == ssh.KeyAlgoRSA && flags&agent.SignatureFlagRsaSha256 != 0:
+				alg = ssh.SigAlgoRSASHA2256
+			case alg == ssh.KeyAlgoRSA && flags&agent.SignatureFlagRsaSha512 != 0:
+				alg = ssh.SigAlgoRSASHA2512
+			}
+
+			var sg *ssh.Signature
+			sg, err = s.(ssh.AlgorithmSigner).SignWithAlgorithm(rand.Reader, data, alg)
+			if err != nil {
+				break
+			}
+
+			return sg, err
+		}
+		if err == nil {
+			return nil, fmt.Errorf("no private keys match the requested public key")
+		} else if strings.Contains(err.Error(), "remaining") {
 			continue
 		}
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		a.touchNotification = time.NewTimer(5 * time.Second)
-		go func() {
-			select {
-			case <-a.touchNotification.C:
-			case <-ctx.Done():
-				a.touchNotification.Stop()
-				return
-			}
-			showNotification("Waiting for YubiKey touch...")
-		}()
-
-		alg := key.Type()
-		switch {
-		case alg == ssh.KeyAlgoRSA && flags&agent.SignatureFlagRsaSha256 != 0:
-			alg = ssh.SigAlgoRSASHA2256
-		case alg == ssh.KeyAlgoRSA && flags&agent.SignatureFlagRsaSha512 != 0:
-			alg = ssh.SigAlgoRSASHA2512
-		}
-		// TODO: maybe retry if the PIN is not correct?
-		return s.(ssh.AlgorithmSigner).SignWithAlgorithm(rand.Reader, data, alg)
+		return nil, err
 	}
-	return nil, fmt.Errorf("no private keys match the requested public key")
 }
 
 func showNotification(message string) {
