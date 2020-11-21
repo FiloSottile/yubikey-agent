@@ -26,12 +26,13 @@ yubikey-agent -setup # generate a new key on the YubiKey
 Then add the following lines to your `~/.zshrc` and restart the shell.
 
 ```
-# the following two lines ensure that the updated SSH_AUTH_SOCK is also made available to interactive applications using it; and not just the shell.
-rm $SSH_AUTH_SOCK
-ln -s /usr/local/var/run/yubikey-agent.sock $SSH_AUTH_SOCK
-
-# this makes the changed auth sock available in the shell.
-export SSH_AUTH_SOCK="/usr/local/var/run/yubikey-agent.sock"
+# we don't override the $SSH_AUTH_SOCK variable, because this would only set it for the current terminal,
+# and not for interactive applications like Sequel Pro/Sequel Ace or IntelliJ which open SSH connections.
+# That's why we disable the user's built-in SSH agent and override it with the yubikey agent's socket.
+if [ "$SSH_AUTH_SOCK" != "/usr/local/var/run/yubikey-agent.sock" ]; then
+    rm $SSH_AUTH_SOCK
+    ln -s /usr/local/var/run/yubikey-agent.sock $SSH_AUTH_SOCK
+fi
 ```
 
 ### Linux
