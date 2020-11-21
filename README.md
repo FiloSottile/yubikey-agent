@@ -23,9 +23,14 @@ brew services start yubikey-agent
 yubikey-agent -setup # generate a new key on the YubiKey
 ```
 
-Then add the following line to your `~/.zshrc` and restart the shell.
+Then add the following lines to your `~/.zshrc` and restart the shell.
 
 ```
+# the following two lines ensure that the updated SSH_AUTH_SOCK is also made available to interactive applications using it; and not just the shell.
+rm $SSH_AUTH_SOCK
+ln -s /usr/local/var/run/yubikey-agent.sock $SSH_AUTH_SOCK
+
+# this makes the changed auth sock available in the shell.
 export SSH_AUTH_SOCK="/usr/local/var/run/yubikey-agent.sock"
 ```
 
