@@ -147,16 +147,30 @@ func (a *Agent) ensureYK() error {
 	return nil
 }
 
-func (a *Agent) connectToYK() (*piv.YubiKey, error) {
+// findYubikey returns the first card that contains "ubikey" in it's name
+// If no name matches this pattern, returns the first card in the system
+func findYubikey() string {
 	cards, err := piv.Cards()
 	if err != nil {
-		return nil, err
+		log.Fatalln("Failed to enumerate tokens:", err)
 	}
 	if len(cards) == 0 {
-		return nil, errors.New("no YubiKey detected")
+		log.Fatalln("No YubiKeys detected!")
 	}
+	for _, card := range cards {
+		if strings.Contains(strings.ToLower(card), "ubikey") {
+			// Return first UbiKey found
+			// YubiKey identifiers: https://support.yubico.com/hc/en-us/articles/360016614920-YubiKey-USB-ID-Values
+			return card
+		}
+	}
+	// Fallback to first card in system
+	return cards[0]
+}
+
+func (a *Agent) connectToYK() (*piv.YubiKey, error) {
 	// TODO: support multiple YubiKeys.
-	yk, err := piv.Open(cards[0])
+	yk, err := piv.Open(findYubikey())
 	if err != nil {
 		return nil, err
 	}
