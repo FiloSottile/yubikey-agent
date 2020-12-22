@@ -77,7 +77,8 @@ func runSetup() {
 	fmt.Print("\n")
 	if err != nil {
 		log.Fatalln("Failed to read PIN:", err)
-	} else if !bytes.Equal(repeat, pin) {
+	}
+	if !bytes.Equal(repeat, pin) {
 		log.Fatalln("PINs don't match!")
 	}
 
