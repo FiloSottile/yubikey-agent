@@ -51,23 +51,15 @@ func connectForSetup() *piv.YubiKey {
 	return yk
 }
 
-func runReset(yk *piv.YubiKey) {
+func runReset() {
 	fmt.Println("Resetting YubiKey PIV applet...")
+	yk := connectForSetup()
 	if err := yk.Reset(); err != nil {
 		log.Fatalln("Failed to reset YubiKey:", err)
 	}
 }
 
-func runSetup(yk *piv.YubiKey) {
-	if _, err := yk.Certificate(piv.SlotAuthentication); err == nil {
-		log.Println("‼️  This YubiKey looks already setup")
-		log.Println("")
-		log.Println("If you want to wipe all PIV keys and start fresh,")
-		log.Fatalln("use --really-delete-all-piv-keys ⚠️")
-	} else if !errors.Is(err, piv.ErrNotFound) {
-		log.Fatalln("Failed to access authentication slot:", err)
-	}
-
+func runSetup() {
 	fmt.Println("🔐 The PIN is up to 8 numbers, letters, or symbols. Not just numbers!")
 	fmt.Println("❌ The key will be lost if the PIN and PUK are locked after 3 incorrect tries.")
 	fmt.Println("")
@@ -87,6 +79,16 @@ func runSetup(yk *piv.YubiKey) {
 		log.Fatalln("Failed to read PIN:", err)
 	} else if !bytes.Equal(repeat, pin) {
 		log.Fatalln("PINs don't match!")
+	}
+
+	yk := connectForSetup()
+	if _, err := yk.Certificate(piv.SlotAuthentication); err == nil {
+		log.Println("‼️  This YubiKey looks already setup")
+		log.Println("")
+		log.Println("If you want to wipe all PIV keys and start fresh,")
+		log.Fatalln("use --really-delete-all-piv-keys ⚠️")
+	} else if !errors.Is(err, piv.ErrNotFound) {
+		log.Fatalln("Failed to access authentication slot:", err)
 	}
 
 	fmt.Println("")

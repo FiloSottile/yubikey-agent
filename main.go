@@ -71,11 +71,10 @@ func main() {
 
 	if *setupFlag {
 		log.SetFlags(0)
-		yk := connectForSetup()
 		if *resetFlag {
-			runReset(yk)
+			runReset()
 		}
-		runSetup(yk)
+		runSetup()
 	} else {
 		if *socketPath == "" {
 			flag.Usage()
