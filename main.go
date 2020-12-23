@@ -88,6 +88,7 @@ type Agent struct {
 	mu     sync.Mutex
 	yk     *piv.YubiKey
 	serial uint32
+	ykPIN  string
 
 	// touchNotification is armed by Sign to show a notification if waiting for
 	// more than a few seconds for the touch operation. It is paused and reset
@@ -195,6 +196,9 @@ func (a *Agent) getPIN() (string, error) {
 	if a.touchNotification != nil && a.touchNotification.Stop() {
 		defer a.touchNotification.Reset(5 * time.Second)
 	}
+	if a.ykPIN != "" {
+		return a.ykPIN, nil
+	}
 	p, err := pinentry.New()
 	if err != nil {
 		return "", fmt.Errorf("failed to start %q: %w", pinentry.GetBinary(), err)
@@ -214,6 +218,11 @@ func (a *Agent) getPIN() (string, error) {
 	p.Set("KEYINFO", fmt.Sprintf("--yubikey-id-%d", a.serial))
 
 	pin, err := p.GetPin()
+	if err != nil {
+		return "", err
+	}
+	a.ykPIN = string(pin)
+
 	return string(pin), err
 }
 
