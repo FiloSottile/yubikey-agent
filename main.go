@@ -51,6 +51,7 @@ func main() {
 
 	socketPath := flag.String("l", "", "agent: path of the UNIX socket to listen on")
 	resetFlag := flag.Bool("really-delete-all-piv-keys", false, "setup: reset the PIV applet")
+	generateKeyInsecurelyFlag := flag.Bool("generate-key-on-computer-insecurely", false, "setup: generate the key on the computer instead on the hardware token, this allows creating a copy of the private key but also exposes it to exfiltration and manipulation")
 	setupFlag := flag.Bool("setup", false, "setup: configure a new YubiKey")
 	flag.Parse()
 
@@ -65,7 +66,7 @@ func main() {
 		if *resetFlag {
 			runReset(yk)
 		}
-		runSetup(yk)
+		runSetup(yk, *generateKeyInsecurelyFlag)
 	} else {
 		if *socketPath == "" {
 			flag.Usage()
@@ -276,7 +277,12 @@ func (a *Agent) signers() ([]ssh.Signer, error) {
 	priv, err := a.yk.PrivateKey(
 		piv.SlotAuthentication,
 		pk.(ssh.CryptoPublicKey).CryptoPublicKey(),
-		piv.KeyAuth{PINPrompt: a.getPIN},
+		// We need to specify PINPolicy manually here. If we don't, then it'll
+		// be tried to be inferred from the certificate atestation and that
+		// will fail if the key has been generated insecurely on the computer
+		// (there's a -setup switch for that) instead of on the hardware
+		// device.
+		piv.KeyAuth{PINPrompt: a.getPIN, PINPolicy: piv.PINPolicyOnce},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare private key: %w", err)

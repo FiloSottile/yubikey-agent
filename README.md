@@ -136,6 +136,8 @@ In practice, any PIV token with an RSA or ECDSA P-256 key and certificate in the
 
 `yubikey-agent -setup` generates a random Management Key and [stores it in PIN-protected metadata](https://pkg.go.dev/github.com/go-piv/piv-go/piv?tab=doc#YubiKey.SetMetadata).
 
+By default `yubikey-agent -setup` generates the private key on the hardware token (a YubiKey device). There's a `--generate-key-on-computer-insecurely` switch that makes it generate the private key on the computer running `yubikey-agent`, import the key to the YubiKey device and print the private key on the screen. This allows creating a backup of the private key in case you lose or damage your YubiKey. This option **should only be used if you know what you're doing**, because generating a key this way exposes it to being exfiltrated or manipulated when importing to the device which makes you less secure.
+
 ### Alternatives
 
 #### Native FIDO2
