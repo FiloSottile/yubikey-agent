@@ -31,8 +31,8 @@ github.com/envoyproxy/go-control-plane v0.9.1-0.20191026205805-5f8ba28d4473/go.m
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
 github.com/fatih/color v1.9.0 h1:8xPHl4/q1VyqGIPif1F+1V3Y3lSmrq01EabUW3CoW5s=
 github.com/fatih/color v1.9.0/go.mod h1:eQcE1qtQxscV5RaZvpXrrb8Drkc3/DdQ+uUYCNjL+zU=
-github.com/go-piv/piv-go v1.5.1-0.20200523071327-a3e5767e8b72 h1:ks5VMs/eHR427mPrB3+v7DtN+VO2Ndp/csIc0ZADApE=
-github.com/go-piv/piv-go v1.5.1-0.20200523071327-a3e5767e8b72/go.mod h1:ON2WvQncm7dIkCQ7kYJs+nc3V4jHGfrrJnSF8HKy7Gk=
+github.com/go-piv/piv-go v1.7.0 h1:rfjdFdASfGV5KLJhSjgpGJ5lzVZVtRWn8ovy/H9HQ/U=
+github.com/go-piv/piv-go v1.7.0/go.mod h1:ON2WvQncm7dIkCQ7kYJs+nc3V4jHGfrrJnSF8HKy7Gk=
 github.com/godbus/dbus v0.0.0-20190623212516-8a1682060722 h1:NNKZiuNXd6lpZRyoFM/uhssj5W9Ps1DbhGHxT49Pm9I=
 github.com/godbus/dbus v0.0.0-20190623212516-8a1682060722/go.mod h1:bBOAhwG1umN6/6ZUMtDFBMQR8jRg9O75tm9K00oMsK4=
 github.com/gokyle/twofactor v1.0.1 h1:uRhvx0S4Hb82RPIDALnf7QxbmPL49LyyaCkJDpWx+Ek=

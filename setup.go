@@ -8,11 +8,13 @@ package main
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"log"
@@ -65,7 +67,7 @@ func runReset(yk *piv.YubiKey) {
 	}
 }
 
-func runSetup(yk *piv.YubiKey) {
+func runSetup(yk *piv.YubiKey, generateKeyOnComputerInsecurely bool) {
 	if _, err := yk.Certificate(piv.SlotAuthentication); err == nil {
 		log.Println("‼️  This YubiKey looks already setup")
 		log.Println("")
@@ -136,13 +138,57 @@ func runSetup(yk *piv.YubiKey) {
 		log.Fatalln("use --really-delete-all-piv-keys ⚠️")
 	}
 
-	pub, err := yk.GenerateKey(key, piv.SlotAuthentication, piv.Key{
+	var pub crypto.PublicKey
+	keyPolicy := piv.Key{
 		Algorithm:   piv.AlgorithmEC256,
 		PINPolicy:   piv.PINPolicyOnce,
 		TouchPolicy: piv.TouchPolicyAlways,
-	})
-	if err != nil {
-		log.Fatalln("Failed to generate key:", err)
+	}
+	if generateKeyOnComputerInsecurely {
+		actualPriv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			log.Fatalln("Failed to generate the private key on computer:", err)
+		}
+
+		privateKeyBytes, err := x509.MarshalPKCS8PrivateKey(actualPriv)
+		if err != nil {
+			log.Fatalln("Failed to marshal the private key:", err)
+		}
+		privateKeyBlock := pem.Block{
+			Type:  "PRIVATE KEY",
+			Bytes: privateKeyBytes,
+		}
+		privateKeyEncoded := pem.EncodeToMemory(&privateKeyBlock)
+		if privateKeyEncoded == nil {
+			log.Fatalln("Failed to encode the private key")
+		}
+		log.Println("‼️  --generate-key-on-computer-insecurely was used.")
+		log.Println("This means that the private key is generated on the")
+		log.Println("computer instead of the hardware token.")
+		log.Println("")
+		log.Println("Generating the private key on the computer allows you")
+		log.Println("to create a backup of the key but also makes you less")
+		log.Println("secure as the private key can now be exfiltrated or")
+		log.Println("replaced with another key before being imported to the")
+		log.Println("hardware token. Such key cannot be considered")
+		log.Println("hardware-backed.")
+		log.Println("")
+		log.Println("If you don't know what you're doing don't use this key")
+		log.Println("and generate another one the default way securely.")
+		log.Println("")
+		log.Println("‼️  Your private SSH key (read the whole warning above):")
+		os.Stdout.Write(privateKeyEncoded)
+
+		err = yk.SetPrivateKeyInsecure(key, piv.SlotAuthentication, actualPriv, keyPolicy)
+		if err != nil {
+			log.Fatalln("Failed to import the key to the device:", err)
+		}
+		pub = actualPriv.Public()
+	} else {
+		pub, err = yk.GenerateKey(key, piv.SlotAuthentication, keyPolicy)
+		if err != nil {
+			log.Fatalln("Failed to generate key:", err)
+		}
 	}
 
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
