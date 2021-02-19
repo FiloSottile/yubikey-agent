@@ -20,19 +20,15 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"os/signal"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/go-piv/piv-go/piv"
 	"github.com/gopasspw/gopass/pkg/pinentry"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
-	"golang.org/x/crypto/ssh/terminal"
 )
 
 func main() {
@@ -43,13 +39,27 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\n")
 		fmt.Fprintf(os.Stderr, "\t\tGenerate a new SSH key on the attached YubiKey.\n")
 		fmt.Fprintf(os.Stderr, "\n")
-		fmt.Fprintf(os.Stderr, "\tyubikey-agent -l PATH\n")
-		fmt.Fprintf(os.Stderr, "\n")
-		fmt.Fprintf(os.Stderr, "\t\tRun the agent, listening on the UNIX socket at PATH.\n")
-		fmt.Fprintf(os.Stderr, "\n")
+		if runtime.GOOS == "windows" {
+			fmt.Fprintf(os.Stderr, "\tyubikey-agent [-l PATH]\n")
+			fmt.Fprintf(os.Stderr, "\n")
+			fmt.Fprintf(os.Stderr, "\t\tRun the agent,\n")
+			fmt.Fprintf(os.Stderr, "\t\tlistening on the named pipe at PATH.\n")
+			fmt.Fprintf(os.Stderr, "\t\tdefaults to \\\\.\\\\pipe\\\\openssh-ssh-agent\n")
+			fmt.Fprintf(os.Stderr, "\n")
+		} else {
+			fmt.Fprintf(os.Stderr, "\tyubikey-agent -l PATH\n")
+			fmt.Fprintf(os.Stderr, "\n")
+			fmt.Fprintf(os.Stderr, "\t\tRun the agent, listening on the UNIX socket at PATH.\n")
+			fmt.Fprintf(os.Stderr, "\n")
+		}
 	}
 
-	socketPath := flag.String("l", "", "agent: path of the UNIX socket to listen on")
+	var socketPath *string
+	if runtime.GOOS == "windows" {
+		socketPath = flag.String("l", "\\\\.\\\\pipe\\\\openssh-ssh-agent", "agent: named pipe to listen on")
+	} else {
+		socketPath = flag.String("l", "", "agent: path of the UNIX socket to listen on")
+	}
 	resetFlag := flag.Bool("really-delete-all-piv-keys", false, "setup: reset the PIV applet")
 	setupFlag := flag.Bool("setup", false, "setup: configure a new YubiKey")
 	flag.Parse()
@@ -61,11 +71,10 @@ func main() {
 
 	if *setupFlag {
 		log.SetFlags(0)
-		yk := connectForSetup()
 		if *resetFlag {
-			runReset(yk)
+			runReset()
 		}
-		runSetup(yk)
+		runSetup()
 	} else {
 		if *socketPath == "" {
 			flag.Usage()
@@ -75,36 +84,21 @@ func main() {
 	}
 }
 
-func runAgent(socketPath string) {
-	if _, err := exec.LookPath(pinentry.GetBinary()); err != nil {
-		log.Fatalf("PIN entry program %q not found!", pinentry.GetBinary())
-	}
+type Agent struct {
+	mu     sync.Mutex
+	yk     *piv.YubiKey
+	serial uint32
+	ykPIN  string
 
-	if terminal.IsTerminal(int(os.Stdin.Fd())) {
-		log.Println("Warning: yubikey-agent is meant to run as a background daemon.")
-		log.Println("Running multiple instances is likely to lead to conflicts.")
-		log.Println("Consider using the launchd or systemd services.")
-	}
+	// touchNotification is armed by Sign to show a notification if waiting for
+	// more than a few seconds for the touch operation. It is paused and reset
+	// by getPIN so it won't fire while waiting for the PIN.
+	touchNotification *time.Timer
+}
 
-	a := &Agent{}
+var _ agent.ExtendedAgent = &Agent{}
 
-	c := make(chan os.Signal)
-	signal.Notify(c, syscall.SIGHUP)
-	go func() {
-		for range c {
-			a.Close()
-		}
-	}()
-
-	os.Remove(socketPath)
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0777); err != nil {
-		log.Fatalln("Failed to create UNIX socket folder:", err)
-	}
-	l, err := net.Listen("unix", socketPath)
-	if err != nil {
-		log.Fatalln("Failed to listen on UNIX socket:", err)
-	}
-
+func serveConns(l net.Listener, a *Agent) {
 	for {
 		c, err := l.Accept()
 		if err != nil {
@@ -120,20 +114,8 @@ func runAgent(socketPath string) {
 		}
 		go a.serveConn(c)
 	}
+
 }
-
-type Agent struct {
-	mu     sync.Mutex
-	yk     *piv.YubiKey
-	serial uint32
-
-	// touchNotification is armed by Sign to show a notification if waiting for
-	// more than a few seconds for the touch operation. It is paused and reset
-	// by getPIN so it won't fire while waiting for the PIN.
-	touchNotification *time.Timer
-}
-
-var _ agent.ExtendedAgent = &Agent{}
 
 func (a *Agent) serveConn(c net.Conn) {
 	if err := agent.ServeAgent(a, c); err != io.EOF {
@@ -165,16 +147,30 @@ func (a *Agent) ensureYK() error {
 	return nil
 }
 
-func (a *Agent) connectToYK() (*piv.YubiKey, error) {
+// findYubikey returns the first card that contains "ubikey" in it's name
+// If no name matches this pattern, returns the first card in the system
+func findYubikey() string {
 	cards, err := piv.Cards()
 	if err != nil {
-		return nil, err
+		log.Fatalln("Failed to enumerate tokens:", err)
 	}
 	if len(cards) == 0 {
-		return nil, errors.New("no YubiKey detected")
+		log.Fatalln("No YubiKeys detected!")
 	}
+	for _, card := range cards {
+		if strings.Contains(strings.ToLower(card), "ubikey") {
+			// Return first UbiKey found
+			// YubiKey identifiers: https://support.yubico.com/hc/en-us/articles/360016614920-YubiKey-USB-ID-Values
+			return card
+		}
+	}
+	// Fallback to first card in system
+	return cards[0]
+}
+
+func (a *Agent) connectToYK() (*piv.YubiKey, error) {
 	// TODO: support multiple YubiKeys.
-	yk, err := piv.Open(cards[0])
+	yk, err := piv.Open(findYubikey())
 	if err != nil {
 		return nil, err
 	}
@@ -200,6 +196,9 @@ func (a *Agent) getPIN() (string, error) {
 	if a.touchNotification != nil && a.touchNotification.Stop() {
 		defer a.touchNotification.Reset(5 * time.Second)
 	}
+	if a.ykPIN != "" {
+		return a.ykPIN, nil
+	}
 	p, err := pinentry.New()
 	if err != nil {
 		return "", fmt.Errorf("failed to start %q: %w", pinentry.GetBinary(), err)
@@ -219,6 +218,11 @@ func (a *Agent) getPIN() (string, error) {
 	p.Set("KEYINFO", fmt.Sprintf("--yubikey-id-%d", a.serial))
 
 	pin, err := p.GetPin()
+	if err != nil {
+		return "", err
+	}
+	a.ykPIN = string(pin)
+
 	return string(pin), err
 }
 
