@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/go-piv/piv-go/piv"
-	"github.com/gopasspw/gopass/pkg/pinentry"
+	"github.com/gopasspw/pinentry"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/terminal"
