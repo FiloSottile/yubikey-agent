@@ -3,7 +3,7 @@
 Note: this is usually only necessary in case your distribution doesn't already
 provide a yubikey-agent as a package.
 
-Refer to [the README](README) for a list of distributions providing packages.
+Refer to [the README](README.md) for a list of distributions providing packages.
 
 First, install Go and the [`piv-go` dependencies](https://github.com/go-piv/piv-go#installation), build `yubikey-agent` and place it in `$PATH`.
 
