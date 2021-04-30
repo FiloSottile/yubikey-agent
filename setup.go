@@ -23,7 +23,7 @@ import (
 
 	"github.com/go-piv/piv-go/piv"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 )
 
 // Version can be set at link time to override debug.BuildInfo.Main.Version,
@@ -79,7 +79,7 @@ func runSetup(yk *piv.YubiKey) {
 	fmt.Println("❌ The key will be lost if the PIN and PUK are locked after 3 incorrect tries.")
 	fmt.Println("")
 	fmt.Print("Choose a new PIN/PUK: ")
-	pin, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+	pin, err := term.ReadPassword(int(os.Stdin.Fd()))
 	fmt.Print("\n")
 	if err != nil {
 		log.Fatalln("Failed to read PIN:", err)
@@ -88,7 +88,7 @@ func runSetup(yk *piv.YubiKey) {
 		log.Fatalln("The PIN needs to be 1-8 characters.")
 	}
 	fmt.Print("Repeat PIN/PUK: ")
-	repeat, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+	repeat, err := term.ReadPassword(int(os.Stdin.Fd()))
 	fmt.Print("\n")
 	if err != nil {
 		log.Fatalln("Failed to read PIN:", err)
