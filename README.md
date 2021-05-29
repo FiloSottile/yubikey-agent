@@ -138,7 +138,7 @@ In practice, any PIV token with an RSA or ECDSA P-256 key and certificate in the
 
 #### Native FIDO2
 
-Recent versions of OpenSSH [support using FIDO2 tokens as keys](https://buttondown.email/cryptography-dispatches/archive/cryptography-dispatches-openssh-82-just-works/). Since those are their own key type, they require server-side support, which is currently not available in Debian stable or on GitHub.
+Recent versions of OpenSSH [support using FIDO2 tokens as keys](https://buttondown.email/cryptography-dispatches/archive/cryptography-dispatches-openssh-82-just-works/). Since those are their own key type, they require server-side support, which is currently available on Github but not available in Debian stable.
 
 FIDO2 keys also usually don't require a PIN, but depending on the token can require a private key file. `yubikey-agent` keys can be ported to a different machine simply by plugging in the YubiKey.
 
