@@ -24,7 +24,7 @@ yubikey-agent -setup # generate a new key on the YubiKey
 Then add the following line to your `~/.zshrc` and restart the shell.
 
 ```
-export SSH_AUTH_SOCK="/usr/local/var/run/yubikey-agent.sock"
+export SSH_AUTH_SOCK="$(brew --prefix)/var/run/yubikey-agent.sock"
 ```
 
 ### Linux
