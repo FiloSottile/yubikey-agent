@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
@@ -50,6 +51,7 @@ func main() {
 	}
 
 	socketPath := flag.String("l", "", "agent: path of the UNIX socket to listen on")
+	ed25519Flag := flag.Bool("ed25519", false, "setup: generate Ed25519 key")
 	resetFlag := flag.Bool("really-delete-all-piv-keys", false, "setup: reset the PIV applet")
 	setupFlag := flag.Bool("setup", false, "setup: configure a new YubiKey")
 	flag.Parse()
@@ -65,7 +67,7 @@ func main() {
 		if *resetFlag {
 			runReset(yk)
 		}
-		runSetup(yk)
+		runSetup(yk, *ed25519Flag)
 	} else {
 		if *socketPath == "" {
 			flag.Usage()
@@ -247,6 +249,7 @@ func getPublicKey(yk *piv.YubiKey, slot piv.Slot) (ssh.PublicKey, error) {
 	}
 	switch cert.PublicKey.(type) {
 	case *ecdsa.PublicKey:
+	case ed25519.PublicKey:
 	case *rsa.PublicKey:
 	default:
 		return nil, fmt.Errorf("unexpected public key type: %T", cert.PublicKey)
