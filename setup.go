@@ -65,7 +65,7 @@ func runReset(yk *piv.YubiKey) {
 	}
 }
 
-func runSetup(yk *piv.YubiKey) {
+func runSetup(yk *piv.YubiKey, touchPolicy piv.TouchPolicy) {
 	if _, err := yk.Certificate(piv.SlotAuthentication); err == nil {
 		log.Println("‼️  This YubiKey looks already setup")
 		log.Println("")
@@ -139,7 +139,7 @@ func runSetup(yk *piv.YubiKey) {
 	pub, err := yk.GenerateKey(key, piv.SlotAuthentication, piv.Key{
 		Algorithm:   piv.AlgorithmEC256,
 		PINPolicy:   piv.PINPolicyOnce,
-		TouchPolicy: piv.TouchPolicyAlways,
+		TouchPolicy: touchPolicy,
 	})
 	if err != nil {
 		log.Fatalln("Failed to generate key:", err)
