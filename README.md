@@ -126,6 +126,10 @@ ykman piv unblock-pin
 
 If the PUK is also entered incorrectly three times, the key is permanently irrecoverable. The YubiKey PIV applet can be reset with `yubikey-agent -setup --really-delete-all-piv-keys`.
 
+### Retrieving the management key
+
+`yubikey-agent` sets a new PIV management key, and then stores it in the pin-protected key metadata. If you need to retrieve it (for example, to modify the pin/puk retries with `ykman`, you can do so with `yubikey-agent -get-management-key`.
+
 ### Manual setup and technical details
 
 `yubikey-agent` only officially supports YubiKeys set up with `yubikey-agent -setup`.
