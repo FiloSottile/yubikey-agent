@@ -69,6 +69,13 @@ func runSetup(yk *piv.YubiKey) {
 	if _, err := yk.Certificate(piv.SlotAuthentication); err == nil {
 		log.Println("‼️  This YubiKey looks already setup")
 		log.Println("")
+		pub, err := getPublicKey(yk, piv.SlotAuthentication)
+		if err != nil {
+			log.Fatalln("Failed to get public key:", err)
+		}
+		log.Println("🔑 Here's your existing SSH public key:")
+		os.Stdout.Write(ssh.MarshalAuthorizedKey(pub))
+		log.Println("")
 		log.Println("If you want to wipe all PIV keys and start fresh,")
 		log.Fatalln("use --really-delete-all-piv-keys ⚠️")
 	} else if !errors.Is(err, piv.ErrNotFound) {
