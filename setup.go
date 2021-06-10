@@ -19,6 +19,7 @@ import (
 	"math/big"
 	"os"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/go-piv/piv-go/piv"
@@ -42,20 +43,22 @@ func init() {
 	Version = "(unknown version)"
 }
 
-func connectForSetup() *piv.YubiKey {
+func getYK() (*piv.YubiKey, error) {
 	cards, err := piv.Cards()
 	if err != nil {
-		log.Fatalln("Failed to enumerate tokens:", err)
-	}
-	if len(cards) == 0 {
-		log.Fatalln("No YubiKeys detected!")
+		return nil, fmt.Errorf("failed to enumerate tokens: %w", err)
 	}
 	// TODO: support multiple YubiKeys.
-	yk, err := piv.Open(cards[0])
-	if err != nil {
-		log.Fatalln("Failed to connect to the YubiKey:", err)
+	for _, card := range cards {
+		if strings.Contains(strings.ToLower(card), "yubikey") {
+			yk, err := piv.Open(card)
+			if err != nil {
+				return nil, fmt.Errorf("failed to connect to the YubiKey: %w", err)
+			}
+			return yk, nil
+		}
 	}
-	return yk
+	return nil, fmt.Errorf("no YubiKeys detected")
 }
 
 func runReset(yk *piv.YubiKey) {
