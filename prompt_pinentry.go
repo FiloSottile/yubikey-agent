@@ -18,6 +18,7 @@ import (
 )
 
 func init() {
+	pinentry.Unescape = true
 	if _, err := exec.LookPath(pinentry.GetBinary()); err != nil {
 		log.Fatalf("PIN entry program %q not found!", pinentry.GetBinary())
 	}
