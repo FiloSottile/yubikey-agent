@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/go-piv/piv-go/piv"
-	"github.com/gopasspw/pinentry"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/terminal"
@@ -76,10 +75,6 @@ func main() {
 }
 
 func runAgent(socketPath string) {
-	if _, err := exec.LookPath(pinentry.GetBinary()); err != nil {
-		log.Fatalf("PIN entry program %q not found!", pinentry.GetBinary())
-	}
-
 	if terminal.IsTerminal(int(os.Stdin.Fd())) {
 		log.Println("Warning: yubikey-agent is meant to run as a background daemon.")
 		log.Println("Running multiple instances is likely to lead to conflicts.")
@@ -200,26 +195,8 @@ func (a *Agent) getPIN() (string, error) {
 	if a.touchNotification != nil && a.touchNotification.Stop() {
 		defer a.touchNotification.Reset(5 * time.Second)
 	}
-	p, err := pinentry.New()
-	if err != nil {
-		return "", fmt.Errorf("failed to start %q: %w", pinentry.GetBinary(), err)
-	}
-	defer p.Close()
-	p.Set("title", "yubikey-agent PIN Prompt")
-	var retries string
-	if r, err := a.yk.Retries(); err == nil {
-		retries = fmt.Sprintf(" (%d tries remaining)", r)
-	}
-	p.Set("desc", fmt.Sprintf("YubiKey serial number: %d"+retries, a.serial))
-	p.Set("prompt", "Please enter your PIN:")
-
-	// Enable opt-in external PIN caching (in the OS keychain).
-	// https://gist.github.com/mdeguzis/05d1f284f931223624834788da045c65#file-info-pinentry-L324
-	p.Option("allow-external-password-cache")
-	p.Set("KEYINFO", fmt.Sprintf("--yubikey-id-%d", a.serial))
-
-	pin, err := p.GetPin()
-	return string(pin), err
+	r, _ := a.yk.Retries()
+	return getPIN(a.serial, r)
 }
 
 func (a *Agent) List() ([]*agent.Key, error) {
