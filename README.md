@@ -114,6 +114,18 @@ killall -HUP yubikey-agent
 
 This does not affect the FIDO2 functionality.
 
+### Changing PIN and PUK
+
+Use YubiKey Manager to change the PIN and PUK.
+
+`yubikey-agent -setup` sets the PUK to the same value as the PIN.
+
+```
+killall -SIGHUP yubikey-agent
+ykman piv access change-pin
+ykman piv access change-puk
+```
+
 ### Unblocking the PIN with the PUK
 
 If the wrong PIN is entered incorrectly three times in a row, YubiKey Manager can be used to unlock it.
@@ -124,7 +136,7 @@ If the wrong PIN is entered incorrectly three times in a row, YubiKey Manager ca
 ykman piv unblock-pin
 ```
 
-If the PUK is also entered incorrectly three times, the key is permanently irrecoverable. The YubiKey PIV applet can be reset with `yubikey-agent -setup --really-delete-all-piv-keys`.
+If the PUK is also entered incorrectly three times, the key is permanently irrecoverable. The YubiKey PIV applet can be reset with `yubikey-agent --setup --really-delete-all-piv-keys`.
 
 ### Manual setup and technical details
 
