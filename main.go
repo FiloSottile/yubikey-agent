@@ -34,6 +34,52 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 )
 
+type slotConfig map[piv.Slot]piv.PINPolicy
+
+var slotConfiguration = slotConfig{piv.SlotAuthentication: -1}
+
+func (s *slotConfig) String() string {
+	// FIXME: Provide a nicer string representation
+	return fmt.Sprint(slotConfiguration)
+}
+
+func (s *slotConfig) Set(value string) error {
+	slot := strings.Split(value, ",")
+	if len(slot) > 0 {
+		var pin_policy piv.PINPolicy
+		if len(slot) > 1 {
+			switch strings.ToLower(slot[1]) {
+			case "once":
+				pin_policy = piv.PINPolicyOnce
+			case "never":
+				pin_policy = piv.PINPolicyNever
+			case "always":
+				pin_policy = piv.PINPolicyAlways
+			default:
+				return fmt.Errorf("unknown pin caching policy: %s - valid values are: once, never & always", slot[1])
+			}
+		} else {
+			pin_policy = -1
+		}
+
+		switch strings.ToLower(slot[0]) {
+		case "authentication":
+			slotConfiguration[piv.SlotAuthentication] = pin_policy
+		case "signature":
+			slotConfiguration[piv.SlotSignature] = pin_policy
+		case "keymanagement":
+			slotConfiguration[piv.SlotKeyManagement] = pin_policy
+		case "cardauthentication":
+			slotConfiguration[piv.SlotCardAuthentication] = pin_policy
+		default:
+			return fmt.Errorf("unknown card slot: %s - valid values are: Authentication, Signature, KeyManagement & CardAuthentication", slot[0])
+		}
+		return nil
+	} else {
+		return fmt.Errorf("got invalid slot configuration: %s", value)
+	}
+}
+
 func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of yubikey-agent:\n")
@@ -51,6 +97,7 @@ func main() {
 	socketPath := flag.String("l", "", "agent: path of the UNIX socket to listen on")
 	resetFlag := flag.Bool("really-delete-all-piv-keys", false, "setup: reset the PIV applet")
 	setupFlag := flag.Bool("setup", false, "setup: configure a new YubiKey")
+	flag.Var(&slotConfiguration, "slot", "specify which YubiKey slots to use and (optionally) their pin policy: e.g.: --slot Authentication,once --slot Signature,always --slot KeyManagement,once --slot CardAuthentication,never")
 	flag.Parse()
 
 	if flag.NArg() > 0 {
@@ -206,15 +253,20 @@ func (a *Agent) List() ([]*agent.Key, error) {
 		return nil, fmt.Errorf("could not reach YubiKey: %w", err)
 	}
 
-	pk, err := getPublicKey(a.yk, piv.SlotAuthentication)
-	if err != nil {
-		return nil, err
+	var keys []*agent.Key
+
+	for slot, _ := range slotConfiguration {
+		pk, err := getPublicKey(a.yk, slot)
+		if err == nil {
+			keys = append(keys, &agent.Key{
+				Format:  pk.Type(),
+				Blob:    pk.Marshal(),
+				Comment: fmt.Sprintf("YubiKey #%d PIV Slot %s", a.serial, slot),
+			})
+		}
 	}
-	return []*agent.Key{{
-		Format:  pk.Type(),
-		Blob:    pk.Marshal(),
-		Comment: fmt.Sprintf("YubiKey #%d PIV Slot 9a", a.serial),
-	}}, nil
+
+	return keys, nil
 }
 
 func getPublicKey(yk *piv.YubiKey, slot piv.Slot) (ssh.PublicKey, error) {
@@ -246,23 +298,38 @@ func (a *Agent) Signers() ([]ssh.Signer, error) {
 }
 
 func (a *Agent) signers() ([]ssh.Signer, error) {
-	pk, err := getPublicKey(a.yk, piv.SlotAuthentication)
-	if err != nil {
-		return nil, err
+	var signers []ssh.Signer
+	signerErrors := map[piv.Slot]error{}
+
+	for slot, pin_policy := range slotConfiguration {
+		pk, err := getPublicKey(a.yk, slot)
+		if err != nil {
+			signerErrors[slot] = fmt.Errorf("failed to retrieve public key: %w", err)
+			continue
+		}
+
+		priv, err := a.yk.PrivateKey(
+			slot,
+			pk.(ssh.CryptoPublicKey).CryptoPublicKey(),
+			piv.KeyAuth{PINPrompt: a.getPIN, PINPolicy: pin_policy},
+		)
+		if err != nil {
+			signerErrors[slot] = fmt.Errorf("failed to prepare private key: %w", err)
+			continue
+		}
+		s, err := ssh.NewSignerFromKey(priv)
+		if err != nil {
+			signerErrors[slot] = fmt.Errorf("failed to prepare signer: %w", err)
+			continue
+		}
+		signers = append(signers, s)
 	}
-	priv, err := a.yk.PrivateKey(
-		piv.SlotAuthentication,
-		pk.(ssh.CryptoPublicKey).CryptoPublicKey(),
-		piv.KeyAuth{PINPrompt: a.getPIN},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare private key: %w", err)
+
+	if len(signers) == 0 {
+		return nil, fmt.Errorf("failed to prepare a valid signer: %s", signerErrors)
 	}
-	s, err := ssh.NewSignerFromKey(priv)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare signer: %w", err)
-	}
-	return []ssh.Signer{s}, nil
+
+	return signers, nil
 }
 
 func (a *Agent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
