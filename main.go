@@ -97,6 +97,7 @@ func main() {
 	socketPath := flag.String("l", "", "agent: path of the UNIX socket to listen on")
 	resetFlag := flag.Bool("really-delete-all-piv-keys", false, "setup: reset the PIV applet")
 	setupFlag := flag.Bool("setup", false, "setup: configure a new YubiKey")
+	cardSerial := flag.Uint("serial", 0, "select a specific YubiKey by its serial number")
 	flag.Var(&slotConfiguration, "slot", "specify which YubiKey slots to use and (optionally) their pin policy: e.g.: --slot Authentication,once --slot Signature,always --slot KeyManagement,once --slot CardAuthentication,never")
 	flag.Parse()
 
@@ -117,18 +118,21 @@ func main() {
 			flag.Usage()
 			os.Exit(1)
 		}
-		runAgent(*socketPath)
+		runAgent(*socketPath, uint32(*cardSerial))
 	}
 }
 
-func runAgent(socketPath string) {
+func runAgent(socketPath string, cardSerial uint32) {
 	if terminal.IsTerminal(int(os.Stdin.Fd())) {
 		log.Println("Warning: yubikey-agent is meant to run as a background daemon.")
 		log.Println("Running multiple instances is likely to lead to conflicts.")
 		log.Println("Consider using the launchd or systemd services.")
 	}
 
-	a := &Agent{}
+	a := &Agent{
+		serial: cardSerial,
+	}
+	defer a.Close()
 
 	c := make(chan os.Signal)
 	signal.Notify(c, syscall.SIGHUP)
@@ -215,15 +219,36 @@ func (a *Agent) connectToYK() (*piv.YubiKey, error) {
 	if len(cards) == 0 {
 		return nil, errors.New("no YubiKey detected")
 	}
-	// TODO: support multiple YubiKeys.
-	yk, err := piv.Open(cards[0])
+
+	// Find a valid yubikey from all present smartcards
+	for _, card := range cards {
+		yk, err := piv.Open(card)
 	if err != nil {
-		return nil, err
+			log.Printf("failed to open card %s: %s\n", card, err)
+		} else {
+			serial, err := yk.Serial()
+			if err != nil {
+				log.Printf("failed to get serial for card %s: %s\n", card, err)
+			} else {
+				if a.serial != 0 {
+					// We are looking for a specific serial
+					if serial == a.serial {
+						return yk, nil
 	}
+				} else {
+					// We use the first valid card that we find
+
 	// Cache the serial number locally because requesting it on older firmwares
 	// requires switching application, which drops the PIN cache.
-	a.serial, _ = yk.Serial()
+					a.serial = serial
 	return yk, nil
+}
+			}
+			yk.Close()
+		}
+	}
+
+	return nil, fmt.Errorf("could not find a yubikey card to use")
 }
 
 func (a *Agent) Close() error {
