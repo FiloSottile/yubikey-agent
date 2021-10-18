@@ -98,6 +98,7 @@ func main() {
 	resetFlag := flag.Bool("really-delete-all-piv-keys", false, "setup: reset the PIV applet")
 	setupFlag := flag.Bool("setup", false, "setup: configure a new YubiKey")
 	cardSerial := flag.Uint("serial", 0, "select a specific YubiKey by its serial number")
+	confirmKeyUsageFlag := flag.Bool("confirm", false, "require confirmation to sign using identities (like ssh-add -c)")
 	flag.Var(&slotConfiguration, "slot", "specify which YubiKey slots to use and (optionally) their pin policy: e.g.: --slot Authentication,once --slot Signature,always --slot KeyManagement,once --slot CardAuthentication,never")
 	flag.Parse()
 
@@ -118,11 +119,11 @@ func main() {
 			flag.Usage()
 			os.Exit(1)
 		}
-		runAgent(*socketPath, uint32(*cardSerial))
+		runAgent(*socketPath, uint32(*cardSerial), *confirmKeyUsageFlag)
 	}
 }
 
-func runAgent(socketPath string, cardSerial uint32) {
+func runAgent(socketPath string, cardSerial uint32, confirmKeyUsageFlag bool) {
 	if terminal.IsTerminal(int(os.Stdin.Fd())) {
 		log.Println("Warning: yubikey-agent is meant to run as a background daemon.")
 		log.Println("Running multiple instances is likely to lead to conflicts.")
@@ -130,7 +131,8 @@ func runAgent(socketPath string, cardSerial uint32) {
 	}
 
 	a := &Agent{
-		serial: cardSerial,
+		serial:          cardSerial,
+		confirmKeyUsage: confirmKeyUsageFlag,
 	}
 	defer a.Close()
 
@@ -169,9 +171,10 @@ func runAgent(socketPath string, cardSerial uint32) {
 }
 
 type Agent struct {
-	mu     sync.Mutex
-	yk     *piv.YubiKey
-	serial uint32
+	mu              sync.Mutex
+	yk              *piv.YubiKey
+	serial          uint32
+	confirmKeyUsage bool
 
 	// touchNotification is armed by Sign to show a notification if waiting for
 	// more than a few seconds for the touch operation. It is paused and reset
@@ -396,6 +399,12 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 			alg = ssh.SigAlgoRSASHA2256
 		case alg == ssh.KeyAlgoRSA && flags&agent.SignatureFlagRsaSha512 != 0:
 			alg = ssh.SigAlgoRSASHA2512
+		}
+
+		if a.confirmKeyUsage {
+			if err := userConfirm(); err != nil {
+				return nil, fmt.Errorf("user aborted signing operation: %w", err)
+			}
 		}
 		// TODO: maybe retry if the PIN is not correct?
 		return s.(ssh.AlgorithmSigner).SignWithAlgorithm(rand.Reader, data, alg)
