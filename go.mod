@@ -1,4 +1,4 @@
-module github.com/gador/yubikey-agent
+module filippo.io/yubikey-agent
 
 go 1.17
 
