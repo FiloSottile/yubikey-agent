@@ -9,4 +9,9 @@ require (
 	golang.org/x/term v0.0.0-20201210144234-2321bbc49cbf
 )
 
-require golang.org/x/sys v0.0.0-20210819135213-f52c844e1c1c // indirect
+require (
+	github.com/danieljoos/wincred v1.1.0 // indirect
+	github.com/godbus/dbus/v5 v5.0.3 // indirect
+	github.com/zalando/go-keyring v0.1.1 // indirect
+	golang.org/x/sys v0.0.0-20210819135213-f52c844e1c1c // indirect
+)

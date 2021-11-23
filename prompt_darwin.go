@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/zalando/go-keyring"
 	"os/exec"
 	"text/template"
 )
@@ -23,13 +24,27 @@ app.displayDialog(
 	"Please enter your PIN:", {
     defaultAnswer: "",
 	withTitle: "yubikey-agent PIN prompt",
-    buttons: ["Cancel", "OK"],
+    buttons: ["Cancel", "OK", "OK and save to keychain"],
     defaultButton: "OK",
 	cancelButton: "Cancel",
     hiddenAnswer: true,
 })`))
 
+var keychainServiceName = "yubikey-agent"
+
 func getPIN(serial uint32, retries int) (string, error) {
+	keychainUserName := fmt.Sprintf("yubikey-agent-%d", serial)
+	if retries >= 3 {
+		// get password
+		secret, err := keyring.Get(keychainServiceName, keychainUserName)
+		if err != nil && err != keyring.ErrNotFound {
+			return "", err
+		}
+		if err == nil {
+			return secret, nil
+		}
+	}
+
 	script := new(bytes.Buffer)
 	if err := scriptTemplate.Execute(script, map[string]interface{}{
 		"Serial": serial, "Tries": retries,
@@ -44,10 +59,17 @@ func getPIN(serial uint32, retries int) (string, error) {
 		return "", fmt.Errorf("failed to execute osascript: %v", err)
 	}
 	var x struct {
-		PIN string `json:"textReturned"`
+		PIN                string `json:"textReturned"`
+		PressedButtonLabel string `json:"buttonReturned"`
 	}
 	if err := json.Unmarshal(out, &x); err != nil {
 		return "", fmt.Errorf("failed to parse osascript output: %v", err)
+	}
+	if x.PressedButtonLabel == "OK and save to keychain" {
+		err := keyring.Set(keychainServiceName, keychainUserName, x.PIN)
+		if err != nil {
+			return "", err
+		}
 	}
 	return x.PIN, nil
 }
