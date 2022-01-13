@@ -295,7 +295,7 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 				a.touchNotification.Stop()
 				return
 			}
-			showNotification("Waiting for YubiKey touch...")
+			_ = showNotification("Waiting for YubiKey touch...")
 		}()
 
 		alg := key.Type()
@@ -311,15 +311,17 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 	return nil, fmt.Errorf("no private keys match the requested public key")
 }
 
-func showNotification(message string) {
+func showNotification(message string) error {
 	switch runtime.GOOS {
 	case "darwin":
 		message = strings.ReplaceAll(message, `\`, `\\`)
 		message = strings.ReplaceAll(message, `"`, `\"`)
 		appleScript := `display notification "%s" with title "yubikey-agent"`
-		exec.Command("osascript", "-e", fmt.Sprintf(appleScript, message)).Run()
+		return exec.Command("osascript", "-e", fmt.Sprintf(appleScript, message)).Run()
 	case "linux":
-		exec.Command("notify-send", "-i", "dialog-password", "yubikey-agent", message).Run()
+		return exec.Command("notify-send", "-i", "dialog-password", "yubikey-agent", message).Run()
+	default:
+		return nil
 	}
 }
 
