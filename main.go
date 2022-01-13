@@ -23,7 +23,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -314,9 +313,7 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 func showNotification(message string) error {
 	switch runtime.GOOS {
 	case "darwin":
-		message = strings.ReplaceAll(message, `\`, `\\`)
-		message = strings.ReplaceAll(message, `"`, `\"`)
-		appleScript := `display notification "%s" with title "yubikey-agent"`
+		appleScript := `display notification %q with title "yubikey-agent"`
 		return exec.Command("osascript", "-e", fmt.Sprintf(appleScript, message)).Run()
 	case "linux":
 		return exec.Command("notify-send", "-i", "dialog-password", "yubikey-agent", message).Run()
