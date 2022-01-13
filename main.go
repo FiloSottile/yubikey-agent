@@ -83,7 +83,7 @@ func runAgent(socketPath string) {
 
 	a := &Agent{}
 
-	c := make(chan os.Signal)
+	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGHUP)
 	go func() {
 		for range c {
