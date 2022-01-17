@@ -11,34 +11,27 @@ package main
 
 import (
 	"fmt"
-	"log"
-	"os/exec"
 
-	"github.com/gopasspw/pinentry"
+	"github.com/twpayne/go-pinentry-minimal/pinentry"
 )
 
-func init() {
-	pinentry.Unescape = true
-	if _, err := exec.LookPath(pinentry.GetBinary()); err != nil {
-		log.Fatalf("PIN entry program %q not found!", pinentry.GetBinary())
-	}
-}
-
 func getPIN(serial uint32, retries int) (string, error) {
-	p, err := pinentry.New()
+	client, err := pinentry.NewClient(
+		pinentry.WithBinaryNameFromGnuPGAgentConf(),
+		pinentry.WithGPGTTY(),
+		pinentry.WithTitle("yubikey-agent PIN Prompt"),
+		pinentry.WithDesc(fmt.Sprintf("YubiKey serial number: %d (%d tries remaining)", serial, retries)),
+		pinentry.WithPrompt("Please enter your PIN:"),
+		// Enable opt-in external PIN caching (in the OS keychain).
+		// https://gist.github.com/mdeguzis/05d1f284f931223624834788da045c65#file-info-pinentry-L324
+		pinentry.WithOption(pinentry.OptionAllowExternalPasswordCache),
+		pinentry.WithKeyInfo(fmt.Sprintf("--yubikey-id-%d", serial)),
+	)
 	if err != nil {
-		return "", fmt.Errorf("failed to start %q: %w", pinentry.GetBinary(), err)
+		return "", err
 	}
-	defer p.Close()
-	p.Set("title", "yubikey-agent PIN Prompt")
-	p.Set("desc", fmt.Sprintf("YubiKey serial number: %d (%d tries remaining)", serial, retries))
-	p.Set("prompt", "Please enter your PIN:")
+	defer client.Close()
 
-	// Enable opt-in external PIN caching (in the OS keychain).
-	// https://gist.github.com/mdeguzis/05d1f284f931223624834788da045c65#file-info-pinentry-L324
-	p.Option("allow-external-password-cache")
-	p.Set("KEYINFO", fmt.Sprintf("--yubikey-id-%d", serial))
-
-	pin, err := p.GetPin()
-	return string(pin), err
+	pin, _, err := client.GetPIN()
+	return pin, err
 }

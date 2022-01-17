@@ -1,7 +1,7 @@
 github.com/go-piv/piv-go v1.9.0 h1:P6j2gjfP7zO7T3nCk/jwCgsvFRwB8shEqAJ4q85jgXc=
 github.com/go-piv/piv-go v1.9.0/go.mod h1:NZ2zmjVkfFaL/CF8cVQ/pXdXtuj110zEKGdJM6fJZZM=
-github.com/gopasspw/pinentry v0.0.3-0.20211111080829-f73e4f2a12d3 h1:+zdLxUTwYgq/TstQIB0OyGkJBKARyRGqiuJ7wkkQC3M=
-github.com/gopasspw/pinentry v0.0.3-0.20211111080829-f73e4f2a12d3/go.mod h1:lR1WuNI96rXXBCgM601Ima3acnX3ZSPthIAuG6lHa68=
+github.com/twpayne/go-pinentry-minimal v0.0.0-20220113210447-2a5dc4396c2a h1:a1bRrtgkiv0tytmDVXU5Dqse/WOTws7JvsY2WxPMZ6M=
+github.com/twpayne/go-pinentry-minimal v0.0.0-20220113210447-2a5dc4396c2a/go.mod h1:ARJJXqNuaxVS84jX6ST52hQh0TtuQZWABhTe95a6BI4=
 golang.org/x/crypto v0.0.0-20210421170649-83a5a9bb288b h1:7mWr3k41Qtv8XlltBkDkl8LoP3mpSgBW8BUoxtEdbXg=
 golang.org/x/crypto v0.0.0-20210421170649-83a5a9bb288b/go.mod h1:T9bdIzuCu7OtxOm1hfPfRQxPLYneinmdGuTeoZ9dtd4=
 golang.org/x/net v0.0.0-20210226172049-e18ecbb05110/go.mod h1:m0MpNAwzfU5UDzcl9v0D8zg8gWTRqZa9RBIspLL5mdg=
