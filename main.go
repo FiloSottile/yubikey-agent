@@ -183,7 +183,7 @@ func (a *Agent) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.yk != nil {
-		log.Println("Received SIGHUP, dropping YubiKey transaction...")
+		log.Println("Received HUP, dropping YubiKey transaction...")
 		err := a.yk.Close()
 		a.yk = nil
 		return err
@@ -336,7 +336,7 @@ func (a *Agent) Remove(key ssh.PublicKey) error {
 	return ErrOperationUnsupported
 }
 func (a *Agent) RemoveAll() error {
-	return ErrOperationUnsupported
+	return a.Close()
 }
 func (a *Agent) Lock(passphrase []byte) error {
 	return ErrOperationUnsupported
