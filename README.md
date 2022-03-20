@@ -106,12 +106,8 @@ Host *
 
 `yubikey-agent` takes a persistent transaction so the YubiKey will cache the PIN after first use. Unfortunately, this makes the YubiKey PIV and PGP applets unavailable to any other applications, like `gpg-agent` and Yubikey Manager. Our upstream [is investigating solutions to this annoyance](https://github.com/go-piv/piv-go/issues/47).
 
-If you need `yubikey-agent` to release its lock on the YubiKey, send it a hangup signal OR use `ssh-add`'s "delete all identities" flag. Likewise, you might have to kill `gpg-agent` after use for it to release its own lock.
+If you need `yubikey-agent` to release its lock on the YubiKey, send it a hangup signal or use `ssh-add`'s "delete all identities" flag. Likewise, you might have to kill `gpg-agent` after use for it to release its own lock.
 
-```
-killall -HUP yubikey-agent
-```
-OR
 ```
 ssh-add -D
 ```
