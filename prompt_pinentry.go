@@ -35,3 +35,16 @@ func getPIN(serial uint32, retries int) (string, error) {
 	pin, _, err := client.GetPIN()
 	return pin, err
 }
+
+func userConfirm() error {
+	p, err := pinentry.New()
+	if err != nil {
+		return fmt.Errorf("failed to start %q: %w", pinentry.GetBinary(), err)
+	}
+	defer p.Close()
+	p.Set("title", "yubikey-agent confirm signing")
+	p.Set("prompt", "Please confirm yubikey operation")
+
+	_, err = p.GetPin()
+	return err
+}

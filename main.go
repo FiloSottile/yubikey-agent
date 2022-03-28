@@ -34,6 +34,52 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 )
 
+type slotConfig map[piv.Slot]piv.PINPolicy
+
+var slotConfiguration = slotConfig{piv.SlotAuthentication: -1}
+
+func (s *slotConfig) String() string {
+	// FIXME: Provide a nicer string representation
+	return fmt.Sprint(slotConfiguration)
+}
+
+func (s *slotConfig) Set(value string) error {
+	slot := strings.Split(value, ",")
+	if len(slot) > 0 {
+		var pin_policy piv.PINPolicy
+		if len(slot) > 1 {
+			switch strings.ToLower(slot[1]) {
+			case "once":
+				pin_policy = piv.PINPolicyOnce
+			case "never":
+				pin_policy = piv.PINPolicyNever
+			case "always":
+				pin_policy = piv.PINPolicyAlways
+			default:
+				return fmt.Errorf("unknown pin caching policy: %s - valid values are: once, never & always", slot[1])
+			}
+		} else {
+			pin_policy = -1
+		}
+
+		switch strings.ToLower(slot[0]) {
+		case "authentication":
+			slotConfiguration[piv.SlotAuthentication] = pin_policy
+		case "signature":
+			slotConfiguration[piv.SlotSignature] = pin_policy
+		case "keymanagement":
+			slotConfiguration[piv.SlotKeyManagement] = pin_policy
+		case "cardauthentication":
+			slotConfiguration[piv.SlotCardAuthentication] = pin_policy
+		default:
+			return fmt.Errorf("unknown card slot: %s - valid values are: Authentication, Signature, KeyManagement & CardAuthentication", slot[0])
+		}
+		return nil
+	} else {
+		return fmt.Errorf("got invalid slot configuration: %s", value)
+	}
+}
+
 func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of yubikey-agent:\n")
@@ -51,6 +97,9 @@ func main() {
 	socketPath := flag.String("l", "", "agent: path of the UNIX socket to listen on")
 	resetFlag := flag.Bool("really-delete-all-piv-keys", false, "setup: reset the PIV applet")
 	setupFlag := flag.Bool("setup", false, "setup: configure a new YubiKey")
+	cardSerial := flag.Uint("serial", 0, "select a specific YubiKey by its serial number")
+	confirmKeyUsageFlag := flag.Bool("confirm", false, "require confirmation to sign using identities (like ssh-add -c)")
+	flag.Var(&slotConfiguration, "slot", "specify which YubiKey slots to use and (optionally) their pin policy: e.g.: --slot Authentication,once --slot Signature,always --slot KeyManagement,once --slot CardAuthentication,never")
 	flag.Parse()
 
 	if flag.NArg() > 0 {
@@ -70,18 +119,22 @@ func main() {
 			flag.Usage()
 			os.Exit(1)
 		}
-		runAgent(*socketPath)
+		runAgent(*socketPath, uint32(*cardSerial), *confirmKeyUsageFlag)
 	}
 }
 
-func runAgent(socketPath string) {
+func runAgent(socketPath string, cardSerial uint32, confirmKeyUsageFlag bool) {
 	if terminal.IsTerminal(int(os.Stdin.Fd())) {
 		log.Println("Warning: yubikey-agent is meant to run as a background daemon.")
 		log.Println("Running multiple instances is likely to lead to conflicts.")
 		log.Println("Consider using the launchd or systemd services.")
 	}
 
-	a := &Agent{}
+	a := &Agent{
+		serial:          cardSerial,
+		confirmKeyUsage: confirmKeyUsageFlag,
+	}
+	defer a.Close()
 
 	c := make(chan os.Signal)
 	signal.Notify(c, syscall.SIGHUP)
@@ -118,9 +171,10 @@ func runAgent(socketPath string) {
 }
 
 type Agent struct {
-	mu     sync.Mutex
-	yk     *piv.YubiKey
-	serial uint32
+	mu              sync.Mutex
+	yk              *piv.YubiKey
+	serial          uint32
+	confirmKeyUsage bool
 
 	// touchNotification is armed by Sign to show a notification if waiting for
 	// more than a few seconds for the touch operation. It is paused and reset
@@ -168,15 +222,36 @@ func (a *Agent) connectToYK() (*piv.YubiKey, error) {
 	if len(cards) == 0 {
 		return nil, errors.New("no YubiKey detected")
 	}
-	// TODO: support multiple YubiKeys.
-	yk, err := piv.Open(cards[0])
+
+	// Find a valid yubikey from all present smartcards
+	for _, card := range cards {
+		yk, err := piv.Open(card)
 	if err != nil {
-		return nil, err
+			log.Printf("failed to open card %s: %s\n", card, err)
+		} else {
+			serial, err := yk.Serial()
+			if err != nil {
+				log.Printf("failed to get serial for card %s: %s\n", card, err)
+			} else {
+				if a.serial != 0 {
+					// We are looking for a specific serial
+					if serial == a.serial {
+						return yk, nil
 	}
+				} else {
+					// We use the first valid card that we find
+
 	// Cache the serial number locally because requesting it on older firmwares
 	// requires switching application, which drops the PIN cache.
-	a.serial, _ = yk.Serial()
+					a.serial = serial
 	return yk, nil
+}
+			}
+			yk.Close()
+		}
+	}
+
+	return nil, fmt.Errorf("could not find a yubikey card to use")
 }
 
 func (a *Agent) Close() error {
@@ -206,15 +281,20 @@ func (a *Agent) List() ([]*agent.Key, error) {
 		return nil, fmt.Errorf("could not reach YubiKey: %w", err)
 	}
 
-	pk, err := getPublicKey(a.yk, piv.SlotAuthentication)
-	if err != nil {
-		return nil, err
+	var keys []*agent.Key
+
+	for slot, _ := range slotConfiguration {
+		pk, err := getPublicKey(a.yk, slot)
+		if err == nil {
+			keys = append(keys, &agent.Key{
+				Format:  pk.Type(),
+				Blob:    pk.Marshal(),
+				Comment: fmt.Sprintf("YubiKey #%d PIV Slot %s", a.serial, slot),
+			})
+		}
 	}
-	return []*agent.Key{{
-		Format:  pk.Type(),
-		Blob:    pk.Marshal(),
-		Comment: fmt.Sprintf("YubiKey #%d PIV Slot 9a", a.serial),
-	}}, nil
+
+	return keys, nil
 }
 
 func getPublicKey(yk *piv.YubiKey, slot piv.Slot) (ssh.PublicKey, error) {
@@ -246,23 +326,38 @@ func (a *Agent) Signers() ([]ssh.Signer, error) {
 }
 
 func (a *Agent) signers() ([]ssh.Signer, error) {
-	pk, err := getPublicKey(a.yk, piv.SlotAuthentication)
-	if err != nil {
-		return nil, err
+	var signers []ssh.Signer
+	signerErrors := map[piv.Slot]error{}
+
+	for slot, pin_policy := range slotConfiguration {
+		pk, err := getPublicKey(a.yk, slot)
+		if err != nil {
+			signerErrors[slot] = fmt.Errorf("failed to retrieve public key: %w", err)
+			continue
+		}
+
+		priv, err := a.yk.PrivateKey(
+			slot,
+			pk.(ssh.CryptoPublicKey).CryptoPublicKey(),
+			piv.KeyAuth{PINPrompt: a.getPIN, PINPolicy: pin_policy},
+		)
+		if err != nil {
+			signerErrors[slot] = fmt.Errorf("failed to prepare private key: %w", err)
+			continue
+		}
+		s, err := ssh.NewSignerFromKey(priv)
+		if err != nil {
+			signerErrors[slot] = fmt.Errorf("failed to prepare signer: %w", err)
+			continue
+		}
+		signers = append(signers, s)
 	}
-	priv, err := a.yk.PrivateKey(
-		piv.SlotAuthentication,
-		pk.(ssh.CryptoPublicKey).CryptoPublicKey(),
-		piv.KeyAuth{PINPrompt: a.getPIN},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare private key: %w", err)
+
+	if len(signers) == 0 {
+		return nil, fmt.Errorf("failed to prepare a valid signer: %s", signerErrors)
 	}
-	s, err := ssh.NewSignerFromKey(priv)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare signer: %w", err)
-	}
-	return []ssh.Signer{s}, nil
+
+	return signers, nil
 }
 
 func (a *Agent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
@@ -304,6 +399,12 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 			alg = ssh.SigAlgoRSASHA2256
 		case alg == ssh.KeyAlgoRSA && flags&agent.SignatureFlagRsaSha512 != 0:
 			alg = ssh.SigAlgoRSASHA2512
+		}
+
+		if a.confirmKeyUsage {
+			if err := userConfirm(); err != nil {
+				return nil, fmt.Errorf("user aborted signing operation: %w", err)
+			}
 		}
 		// TODO: maybe retry if the PIN is not correct?
 		return s.(ssh.AlgorithmSigner).SignWithAlgorithm(rand.Reader, data, alg)
