@@ -133,7 +133,7 @@ If the wrong PIN is entered incorrectly three times in a row, YubiKey Manager ca
 `yubikey-agent -setup` sets the PUK to the same value as the PIN.
 
 ```
-ykman piv unblock-pin
+ykman piv access unblock-pin
 ```
 
 If the PUK is also entered incorrectly three times, the key is permanently irrecoverable. The YubiKey PIV applet can be reset with `yubikey-agent --setup --really-delete-all-piv-keys`.
