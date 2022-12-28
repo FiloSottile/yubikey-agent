@@ -161,15 +161,7 @@ func (a *Agent) ensureYK() error {
 }
 
 func (a *Agent) connectToYK() (*piv.YubiKey, error) {
-	cards, err := piv.Cards()
-	if err != nil {
-		return nil, err
-	}
-	if len(cards) == 0 {
-		return nil, errors.New("no YubiKey detected")
-	}
-	// TODO: support multiple YubiKeys.
-	yk, err := piv.Open(cards[0])
+	yk, err := openYK()
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +169,25 @@ func (a *Agent) connectToYK() (*piv.YubiKey, error) {
 	// requires switching application, which drops the PIN cache.
 	a.serial, _ = yk.Serial()
 	return yk, nil
+}
+
+func openYK() (yk *piv.YubiKey, err error) {
+	cards, err := piv.Cards()
+	if err != nil {
+		return nil, err
+	}
+	if len(cards) == 0 {
+		return nil, errors.New("no YubiKey detected")
+	}
+	// TODO: support multiple YubiKeys. For now, select the first one that opens
+	// successfully, to skip any internal unused smart card readers.
+	for _, card := range cards {
+		yk, err = piv.Open(card)
+		if err == nil {
+			return
+		}
+	}
+	return
 }
 
 func (a *Agent) Close() error {
