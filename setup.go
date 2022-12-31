@@ -51,6 +51,15 @@ func connectForSetup() *piv.YubiKey {
 }
 
 func runReset(yk *piv.YubiKey) {
+	fmt.Print(`Do you want to reset the PIV applet? This will delete all PIV keys. Type "delete": `)
+	var res string
+	if _, err := fmt.Scanln(&res); err != nil {
+		log.Fatalln("Failed to read response:", err)
+	}
+	if res != "delete" {
+		log.Fatalln("Aborting...")
+	}
+
 	fmt.Println("Resetting YubiKey PIV applet...")
 	if err := yk.Reset(); err != nil {
 		log.Fatalln("Failed to reset YubiKey:", err)
