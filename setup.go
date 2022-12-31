@@ -85,8 +85,8 @@ func runSetup(yk *piv.YubiKey) {
 	if err != nil {
 		log.Fatalln("Failed to read PIN:", err)
 	}
-	if len(pin) == 0 || len(pin) > 8 {
-		log.Fatalln("The PIN needs to be 1-8 characters.")
+	if len(pin) < 6 || len(pin) > 8 {
+		log.Fatalln("The PIN needs to be 6-8 characters.")
 	}
 	fmt.Print("Repeat PIN/PUK: ")
 	repeat, err := term.ReadPassword(int(os.Stdin.Fd()))
