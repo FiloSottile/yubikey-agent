@@ -66,7 +66,7 @@ func runReset(yk *piv.YubiKey) {
 	}
 }
 
-func runSetup(yk *piv.YubiKey) {
+func runSetup(yk *piv.YubiKey, ed25519 bool) {
 	if _, err := yk.Certificate(piv.SlotAuthentication); err == nil {
 		log.Println("‼️  This YubiKey looks already setup")
 		log.Println("")
@@ -137,8 +137,13 @@ func runSetup(yk *piv.YubiKey) {
 		log.Fatalln("use --really-delete-all-piv-keys ⚠️")
 	}
 
+	alg := piv.AlgorithmEC256
+	if ed25519 {
+		// hack it in, this relies on the piv-go patch
+		alg = piv.AlgorithmEd25519
+	}
 	pub, err := yk.GenerateKey(key, piv.SlotAuthentication, piv.Key{
-		Algorithm:   piv.AlgorithmEC256,
+		Algorithm:   alg,
 		PINPolicy:   piv.PINPolicyOnce,
 		TouchPolicy: piv.TouchPolicyAlways,
 	})
