@@ -44,6 +44,25 @@ systemctl --user enable --now yubikey-agent
 export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/yubikey-agent/yubikey-agent.sock"
 ```
 
+#### Fedora
+
+On Fedora, use the [`yubikey-agent` copr-Repository](https://copr.fedorainfracloud.org/coprs/domrim/yubikey-agent/) maintained by [domrim](https://github.com/domrim).
+
+Enable repository and install yubikey-agent:
+```
+dnf copr enable domrim/yubikey-agent
+
+dnf install yubikey-agent
+```
+
+After installation enable and start service and export the SSH-Socket-Path:
+```
+systemctl --user enable --now yubikey-agent
+
+export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/yubikey-agent/yubikey-agent.sock"
+```
+
+
 #### NixOS / nixpkgs
 
 On NixOS unstable and 20.09 (unreleased at time of writing), you can
