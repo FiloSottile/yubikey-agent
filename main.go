@@ -231,21 +231,28 @@ func (a *Agent) List() ([]*agent.Key, error) {
 	}
 	defer a.maybeReleaseYK()
 
-	pk, err := getPublicKey(a.yk, piv.SlotAuthentication)
-	if err != nil {
-		return nil, err
+	var keys []*agent.Key
+	for _, slot := range slots {
+		var pk ssh.PublicKey
+		var err error
+		pk, err = getPublicKey(a.yk, slot)
+		if err != nil {
+			continue
+		}
+		k := &agent.Key{
+			Format:  pk.Type(),
+			Blob:    pk.Marshal(),
+			Comment: fmt.Sprintf("YubiKey #%d PIV Slot %x", a.serial, slot.Key),
+		}
+		keys = append(keys, k)
 	}
-	return []*agent.Key{{
-		Format:  pk.Type(),
-		Blob:    pk.Marshal(),
-		Comment: fmt.Sprintf("YubiKey #%d PIV Slot 9a", a.serial),
-	}}, nil
+	return keys, nil
 }
 
 func getPublicKey(yk *piv.YubiKey, slot piv.Slot) (ssh.PublicKey, error) {
 	cert, err := yk.Certificate(slot)
 	if err != nil {
-		return nil, fmt.Errorf("could not get public key: %w", err)
+		return nil, fmt.Errorf("could not get public key from slot %x: %w", slot.Key, err)
 	}
 	switch cert.PublicKey.(type) {
 	case *ecdsa.PublicKey:
@@ -271,24 +278,35 @@ func (a *Agent) Signers() ([]ssh.Signer, error) {
 	return a.signers()
 }
 
+var slots = []piv.Slot{
+	piv.SlotAuthentication,
+	piv.SlotCardAuthentication,
+	piv.SlotKeyManagement,
+	piv.SlotSignature,
+}
+
 func (a *Agent) signers() ([]ssh.Signer, error) {
-	pk, err := getPublicKey(a.yk, piv.SlotAuthentication)
-	if err != nil {
-		return nil, err
+	var signers []ssh.Signer
+	for _, slot := range slots {
+		pk, err := getPublicKey(a.yk, slot)
+		if err != nil {
+			continue
+		}
+		priv, err := a.yk.PrivateKey(
+			slot,
+			pk.(ssh.CryptoPublicKey).CryptoPublicKey(),
+			piv.KeyAuth{PINPrompt: a.getPIN},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare private key: %w", err)
+		}
+		s, err := ssh.NewSignerFromKey(priv)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare signer: %w", err)
+		}
+		signers = append(signers, s)
 	}
-	priv, err := a.yk.PrivateKey(
-		piv.SlotAuthentication,
-		pk.(ssh.CryptoPublicKey).CryptoPublicKey(),
-		piv.KeyAuth{PINPrompt: a.getPIN},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare private key: %w", err)
-	}
-	s, err := ssh.NewSignerFromKey(priv)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare signer: %w", err)
-	}
-	return []ssh.Signer{s}, nil
+	return signers, nil
 }
 
 func (a *Agent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
