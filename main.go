@@ -346,7 +346,7 @@ func showNotification(message string) {
 		appleScript := `display notification "%s" with title "yubikey-agent"`
 		exec.Command("osascript", "-e", fmt.Sprintf(appleScript, message)).Run()
 	case "linux":
-		exec.Command("notify-send", "-i", "dialog-password", "yubikey-agent", message).Run()
+		exec.Command("notify-send", "-i", "dialog-password", "--expire-time=5000", "yubikey-agent", message).Run()
 	}
 }
 
