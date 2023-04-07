@@ -121,11 +121,6 @@ type Agent struct {
 	mu     sync.Mutex
 	yk     *piv.YubiKey
 	serial uint32
-
-	// touchNotification is armed by Sign to show a notification if waiting for
-	// more than a few seconds for the touch operation. It is paused and reset
-	// by getPIN so it won't fire while waiting for the PIN.
-	touchNotification *time.Timer
 }
 
 var _ agent.ExtendedAgent = &Agent{}
@@ -216,9 +211,6 @@ func (a *Agent) Close() error {
 }
 
 func (a *Agent) getPIN() (string, error) {
-	if a.touchNotification != nil && a.touchNotification.Stop() {
-		defer a.touchNotification.Reset(5 * time.Second)
-	}
 	r, _ := a.yk.Retries()
 	return getPIN(a.serial, r)
 }
@@ -314,15 +306,13 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		a.touchNotification = time.NewTimer(5 * time.Second)
+		remove := showNotification("Waiting for YubiKey touch...")
 		go func() {
 			select {
-			case <-a.touchNotification.C:
 			case <-ctx.Done():
-				a.touchNotification.Stop()
+				remove()
 				return
 			}
-			showNotification("Waiting for YubiKey touch...")
 		}()
 
 		alg := key.Type()
@@ -338,7 +328,8 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 	return nil, fmt.Errorf("no private keys match the requested public key")
 }
 
-func showNotification(message string) {
+// Returns a function to remove the notification if possible
+func showNotification(message string) func() {
 	switch runtime.GOOS {
 	case "darwin":
 		message = strings.ReplaceAll(message, `\`, `\\`)
@@ -346,8 +337,13 @@ func showNotification(message string) {
 		appleScript := `display notification "%s" with title "yubikey-agent"`
 		exec.Command("osascript", "-e", fmt.Sprintf(appleScript, message)).Run()
 	case "linux":
-		exec.Command("notify-send", "-i", "dialog-password", "yubikey-agent", message).Run()
+		cmd := exec.Command("notify-send", "-i", "dialog-password", "--wait", "yubikey-agent", message)
+		cmd.Start()
+		return func() {
+			cmd.Process.Signal(os.Interrupt)
+		}
 	}
+	return func() {}
 }
 
 func (a *Agent) Extension(extensionType string, contents []byte) ([]byte, error) {
