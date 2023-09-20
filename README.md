@@ -65,6 +65,18 @@ nix-env -iA nixpkgs.yubikey-agent
 This installs the software but does *not* install a systemd unit.  You
 will have to set up service management manually (see below).
 
+#### Debian
+
+On Debain, use [the `yubikey-agent` package](https://packages.debian.org/search?keywords=yubikey-agent).
+
+```
+sudo apt update && sudo apt install yubikey-agent
+systemctl --user daemon-reload
+systemctl --user enable --now yubikey-agent
+
+export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/yubikey-agent/yubikey-agent.sock"
+```
+
 #### Other systemd-based Linux systems
 
 On other systemd-based Linux systems, follow [the manual installation instructions](systemd.md).
