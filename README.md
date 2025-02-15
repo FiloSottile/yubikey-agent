@@ -27,6 +27,9 @@ Then add the following line to your `~/.zshrc` and restart the shell.
 export SSH_AUTH_SOCK="$(brew --prefix)/var/run/yubikey-agent.sock"
 ```
 
+If you use Nix on macOS, you can also install & manage the package, service, and shell configuration via
+[home-manager](#nixos--home-manager--nixpkgs).
+
 ### Linux
 
 #### Arch
@@ -44,19 +47,28 @@ systemctl --user enable --now yubikey-agent
 export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/yubikey-agent/yubikey-agent.sock"
 ```
 
-#### NixOS / nixpkgs
+#### NixOS / home-manager / nixpkgs
 
-On NixOS unstable and 20.09 (unreleased at time of writing), you can
-add this to your `/etc/nixos/configuration.nix`:
+On NixOS, you can add this to your `/etc/nixos/configuration.nix`:
 
 ```
 services.yubikey-agent.enable = true;
 ```
 
-This installs `yubikey-agent` and sets up a systemd unit to start
-yubikey-agent for you.
+This installs `yubikey-agent` and sets up a systemd unit to start yubikey-agent for you.
 
-On other systems using nix, you can also install from nixpkgs:
+Or, if you're using [home-manager](https://github.com/nix-community/home-manager), you can use the same
+expression in your user's `home` configuration for a socket activated user service:
+
+```
+home-manager.users.example = {
+  services.yubikey-agent.enable = true;
+};
+```
+
+This is available on both Linux and macOS systems.
+
+On other systems using Nix, you can also install from nixpkgs:
 
 ```
 nix-env -iA nixpkgs.yubikey-agent
