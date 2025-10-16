@@ -103,14 +103,6 @@ func runAgent(socketPath string) {
 	for {
 		c, err := l.Accept()
 		if err != nil {
-			type temporary interface {
-				Temporary() bool
-			}
-			if err, ok := err.(temporary); ok && err.Temporary() {
-				log.Println("Temporary Accept error, sleeping 1s:", err)
-				time.Sleep(1 * time.Second)
-				continue
-			}
 			log.Fatalln("Failed to accept connections:", err)
 		}
 		go a.serveConn(c)
