@@ -332,8 +332,45 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 		case alg == ssh.KeyAlgoRSA && flags&agent.SignatureFlagRsaSha512 != 0:
 			alg = ssh.SigAlgoRSASHA2512
 		}
-		// TODO: maybe retry if the PIN is not correct?
-		return s.(ssh.AlgorithmSigner).SignWithAlgorithm(rand.Reader, data, alg)
+		// Cache the retries value at the beginning of the loop and decrement
+		// locally, instead of calling Retries() on every iteration, to ensure
+		// that this can't get stuck in an infinite loop if the Yubikey isn't
+		// decrementing the retry count for any reason.
+		var err error
+		retries, _ := a.yk.Retries()
+		if retries == 0 {
+			// Ensure that sign is attempted at least once, in the case of
+			// 0 retries remaining but card already unlocked
+			retries = 1
+		}
+		for retries > 0 {
+			var signature *ssh.Signature
+			signature, err = s.(ssh.AlgorithmSigner).SignWithAlgorithm(rand.Reader, data, alg)
+			if err == nil {
+				return signature, err
+			}
+
+			msg := err.Error()
+			if strings.HasPrefix(msg, "pin prompt:") {
+				// Cancel
+				// err = pin prompt: failed to execute osascript: exit status 1
+				// Only show a notification if it doesn't look like user intent to cancel
+				if !strings.Contains(msg, "cancel") {
+					showNotification(fmt.Sprintf("Failed to prompt for PIN: %s", msg))
+				}
+				return nil, err
+			} else if strings.HasPrefix(msg, "pin required but wasn't provided") {
+				// OK but blank
+				// err = pin required but wasn't provided
+				showNotification("PIN required but wasn't provided")
+			} else if strings.HasPrefix(msg, "verify pin:") {
+				// OK but incorrect
+				// err = verify pin: smart card error 63c2: verification failed (2 retries remaining)
+				retries--
+				showNotification(fmt.Sprintf("Incorrect PIN (%d tries remaining)", retries))
+			}
+		}
+		return nil, fmt.Errorf("no remaining PIN retries: %w", err)
 	}
 	return nil, fmt.Errorf("no private keys match the requested public key")
 }

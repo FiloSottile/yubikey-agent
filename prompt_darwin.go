@@ -9,6 +9,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"text/template"
@@ -41,6 +42,11 @@ func getPIN(serial uint32, retries int) (string, error) {
 	c.Stdin = script
 	out, err := c.Output()
 	if err != nil {
+		var exitError *exec.ExitError
+		// osascript error -128 is user canceled
+		if errors.As(err, &exitError) && bytes.Contains(exitError.Stderr, []byte("(-128)")) {
+			return "", fmt.Errorf("user canceled PIN prompt")
+		}
 		return "", fmt.Errorf("failed to execute osascript: %v", err)
 	}
 	var x struct {
