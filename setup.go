@@ -19,6 +19,7 @@ import (
 	"math/big"
 	"os"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/go-piv/piv-go/piv"
@@ -48,6 +49,57 @@ func connectForSetup() *piv.YubiKey {
 		log.Fatalln("Failed to connect to the YubiKey:", err)
 	}
 	return yk
+}
+
+// addKeySlots are the PIV slots that -add-key can use (9c, 9d, 9e). Slot 9a is for initial setup only.
+var addKeySlots = []piv.Slot{
+	piv.SlotSignature,
+	piv.SlotKeyManagement,
+	piv.SlotCardAuthentication,
+}
+
+// generateKeyInSlot generates an ECDSA P-384 key and certificate in the given slot and stores the cert on the YubiKey.
+func generateKeyInSlot(yk *piv.YubiKey, key [24]byte, slot piv.Slot) (interface{}, error) {
+	pub, err := yk.GenerateKey(key, slot, piv.Key{
+		Algorithm:   piv.AlgorithmEC384,
+		PINPolicy:   piv.PINPolicyOnce,
+		TouchPolicy: piv.TouchPolicyAlways,
+	})
+	if err != nil {
+		return nil, err
+	}
+	priv, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	parent := &x509.Certificate{
+		Subject: pkix.Name{
+			Organization:       []string{"yubikey-agent"},
+			OrganizationalUnit: []string{Version},
+		},
+		PublicKey: priv.Public(),
+	}
+	template := &x509.Certificate{
+		Subject: pkix.Name{
+			CommonName: "SSH key",
+		},
+		NotAfter:     time.Now().AddDate(42, 0, 0),
+		NotBefore:    time.Now(),
+		SerialNumber: randomSerialNumber(),
+		KeyUsage:     x509.KeyUsageKeyAgreement | x509.KeyUsageDigitalSignature,
+	}
+	certBytes, err := x509.CreateCertificate(rand.Reader, template, parent, pub, priv)
+	if err != nil {
+		return nil, err
+	}
+	cert, err := x509.ParseCertificate(certBytes)
+	if err != nil {
+		return nil, err
+	}
+	if err := yk.SetCertificate(key, slot, cert); err != nil {
+		return nil, err
+	}
+	return pub, nil
 }
 
 func runReset(yk *piv.YubiKey) {
@@ -137,48 +189,12 @@ func runSetup(yk *piv.YubiKey) {
 		log.Fatalln("use --really-delete-all-piv-keys ⚠️")
 	}
 
-	pub, err := yk.GenerateKey(key, piv.SlotAuthentication, piv.Key{
-		Algorithm:   piv.AlgorithmEC256,
-		PINPolicy:   piv.PINPolicyOnce,
-		TouchPolicy: piv.TouchPolicyAlways,
-	})
+	pub, err := generateKeyInSlot(yk, key, piv.SlotAuthentication)
 	if err != nil {
 		log.Fatalln("Failed to generate key:", err)
 	}
 
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		log.Fatalln("Failed to generate parent key:", err)
-	}
-	parent := &x509.Certificate{
-		Subject: pkix.Name{
-			Organization:       []string{"yubikey-agent"},
-			OrganizationalUnit: []string{Version},
-		},
-		PublicKey: priv.Public(),
-	}
-	template := &x509.Certificate{
-		Subject: pkix.Name{
-			CommonName: "SSH key",
-		},
-		NotAfter:     time.Now().AddDate(42, 0, 0),
-		NotBefore:    time.Now(),
-		SerialNumber: randomSerialNumber(),
-		KeyUsage:     x509.KeyUsageKeyAgreement | x509.KeyUsageDigitalSignature,
-	}
-	certBytes, err := x509.CreateCertificate(rand.Reader, template, parent, pub, priv)
-	if err != nil {
-		log.Fatalln("Failed to generate certificate:", err)
-	}
-	cert, err := x509.ParseCertificate(certBytes)
-	if err != nil {
-		log.Fatalln("Failed to parse certificate:", err)
-	}
-	if err := yk.SetCertificate(key, piv.SlotAuthentication, cert); err != nil {
-		log.Fatalln("Failed to store certificate:", err)
-	}
-
-	sshKey, err := ssh.NewPublicKey(pub)
+	sshKey, err := ssh.NewPublicKey(pub.(*ecdsa.PublicKey))
 	if err != nil {
 		log.Fatalln("Failed to generate public key:", err)
 	}
@@ -194,6 +210,84 @@ func runSetup(yk *piv.YubiKey) {
 	fmt.Println(`set the SSH_AUTH_SOCK environment variable, and test with "ssh-add -L"`)
 	fmt.Println("")
 	fmt.Println("💭 Remember: everything breaks, have a backup plan for when this YubiKey does.")
+}
+
+func runAddKey(yk *piv.YubiKey, slotFlag string) {
+	if _, err := yk.Certificate(piv.SlotAuthentication); errors.Is(err, piv.ErrNotFound) {
+		log.Fatalln("This YubiKey is not yet set up. Run yubikey-agent -setup first.")
+	} else if err != nil {
+		log.Fatalln("Failed to access authentication slot:", err)
+	}
+
+	fmt.Print("Enter current PIN: ")
+	pin, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Print("\n")
+	if err != nil {
+		log.Fatalln("Failed to read PIN:", err)
+	}
+
+	metadata, err := yk.Metadata(string(pin))
+	if err != nil {
+		log.Fatalln("Failed to get metadata (wrong PIN?):", err)
+	}
+	if metadata == nil || metadata.ManagementKey == nil {
+		log.Fatalln("No management key found on device. This YubiKey may not have been set up with yubikey-agent -setup.")
+	}
+	key := *metadata.ManagementKey
+
+	var slot piv.Slot
+	if slotFlag != "" {
+		slotFlag = strings.ToLower(strings.TrimSpace(slotFlag))
+		switch slotFlag {
+		case "9c":
+			slot = piv.SlotSignature
+		case "9d":
+			slot = piv.SlotKeyManagement
+		case "9e":
+			slot = piv.SlotCardAuthentication
+		default:
+			log.Fatalln("Invalid -slot. Use 9c, 9d, or 9e.")
+		}
+		if _, err := yk.Certificate(slot); err == nil {
+			fmt.Printf("Slot %s already has a key. Overwrite? (y/N): ", slotFlag)
+			var confirm string
+			if _, err := fmt.Scanln(&confirm); err != nil {
+				log.Fatalln("Aborting...")
+			}
+			if !strings.EqualFold(strings.TrimSpace(confirm), "y") {
+				log.Fatalln("Aborting...")
+			}
+		}
+	} else {
+		for _, s := range addKeySlots {
+			if _, err := yk.Certificate(s); errors.Is(err, piv.ErrNotFound) {
+				slot = s
+				break
+			}
+		}
+		if slot.Key == 0 && slot.Object == 0 {
+			log.Fatalln("All add-key slots (9c, 9d, 9e) already have keys. Use -slot 9c|9d|9e to overwrite one.")
+		}
+	}
+
+	fmt.Println("")
+	fmt.Println("Generating key in slot", slot.String(), "...")
+
+	pub, err := generateKeyInSlot(yk, key, slot)
+	if err != nil {
+		log.Fatalln("Failed to generate key:", err)
+	}
+
+	sshKey, err := ssh.NewPublicKey(pub.(*ecdsa.PublicKey))
+	if err != nil {
+		log.Fatalln("Failed to generate public key:", err)
+	}
+
+	fmt.Println("")
+	fmt.Println("Done! New SSH public key for slot", slot.String()+":")
+	os.Stdout.Write(ssh.MarshalAuthorizedKey(sshKey))
+	fmt.Println("")
+	fmt.Println("Use ssh-add -L to see all keys.")
 }
 
 func randomSerialNumber() *big.Int {

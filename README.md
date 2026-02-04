@@ -11,6 +11,22 @@ Written in pure Go, it's based on [github.com/go-piv/piv-go](https://github.com/
 
 ![](https://user-images.githubusercontent.com/1225294/81489747-63a03b00-9247-11ea-923a-b7434bcf7fd1.png)
 
+### Building from source
+
+You need **Go**, **pkg-config**, and the **pcsc-lite** development libraries (so `pkg-config` can find `libpcsclite`). Install the dev package for your distro, then run `go build`:
+
+| Distro        | Install |
+|---------------|---------|
+| Debian/Ubuntu | `apt install libpcsclite-dev pkg-config` |
+| Fedora/RHEL   | `dnf install pcsc-lite-devel pkg-config` |
+| Arch          | `pacman -S pcsclite` |
+
+```
+go build
+```
+
+Alternatively, use the [Nix](#nixos--nixpkgs) dev shell: `nix develop` (or `nix-shell`) provides Go and pcsc-lite automatically.
+
 ## Installation
 
 ### macOS
@@ -61,6 +77,30 @@ On other systems using nix, you can also install from nixpkgs:
 ```
 nix-env -iA nixpkgs.yubikey-agent
 ```
+
+**Testing this repo on NixOS:** Build with the flake, enable PC/SC for the YubiKey, then run the agent:
+
+1. **Enable pcscd** (if not already in your config):
+   ```nix
+   services.pcscd.enable = true;
+   ```
+   Then `sudo nixos-rebuild switch` (or reboot).
+
+2. **Build and run** (from this repo):
+   ```bash
+   nix build
+   sudo systemctl start pcscd
+   ./result/bin/yubikey-agent -setup    # optional: generate key on YubiKey (plug it in first)
+   ./result/bin/yubikey-agent -l /tmp/yubikey-agent.sock
+   ```
+   In another terminal (or after backgrounding): `export SSH_AUTH_SOCK=/tmp/yubikey-agent.sock` then `ssh-add -l`.
+
+3. **Optional – user service:** Copy [contrib/systemd/user/yubikey-agent.service](contrib/systemd/user/yubikey-agent.service) to `~/.config/systemd/user/`, set `ExecStart=/path/to/result/bin/yubikey-agent -l %t/yubikey-agent/yubikey-agent.sock`, then:
+   ```bash
+   systemctl --user daemon-reload
+   systemctl --user enable --now yubikey-agent
+   ```
+   Add `export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/yubikey-agent/yubikey-agent.sock"` to your shell profile.
 
 This installs the software but does *not* install a systemd unit.  You
 will have to set up service management manually (see below).
@@ -138,11 +178,31 @@ ykman piv access unblock-pin
 
 If the PUK is also entered incorrectly three times, the key is permanently irrecoverable. The YubiKey PIV applet can be reset with `yubikey-agent --setup --really-delete-all-piv-keys`.
 
+### Multiple SSH keys on one YubiKey
+
+The agent exposes keys from all four PIV slots (9a, 9c, 9d, 9e) when a certificate is present. One YubiKey can thus serve multiple SSH keys. Use `ssh-add -L` to list them (each line shows the slot, e.g. "PIV Slot 9a" or "PIV Slot 9c"). In `~/.ssh/config` you can use `IdentityFile` or `IdentitiesOnly` to choose which key is used per host.
+
+To add another key on an already provisioned YubiKey (after `yubikey-agent -setup`), run:
+
+```
+yubikey-agent -add-key
+```
+
+This uses the first empty slot among 9c, 9d, and 9e. To target a specific slot or overwrite an existing key in that slot:
+
+```
+yubikey-agent -add-key -slot 9c
+yubikey-agent -add-key -slot 9d
+yubikey-agent -add-key -slot 9e
+```
+
+You will be prompted for your current PIN; the management key is read from the device metadata set during `-setup`.
+
 ### Manual setup and technical details
 
 `yubikey-agent` only officially supports YubiKeys set up with `yubikey-agent -setup`.
 
-In practice, any PIV token with an RSA or ECDSA P-256 key and certificate in the Authentication slot should work, with any PIN and touch policy. Simply skip the setup step and use `ssh-add -L` to view the public key.
+In practice, any PIV token with an RSA or ECDSA P-256 key and certificate in the Authentication slot (9a) should work, with any PIN and touch policy. The agent also lists and signs with keys in slots 9c, 9d, and 9e when certificates are present. Simply skip the setup step and use `ssh-add -L` to view the public key(s).
 
 `yubikey-agent -setup` generates a random Management Key and [stores it in PIN-protected metadata](https://pkg.go.dev/github.com/go-piv/piv-go/piv?tab=doc#YubiKey.SetMetadata).
 
