@@ -182,6 +182,19 @@ If the PUK is also entered incorrectly three times, the key is permanently irrec
 
 The agent exposes keys from all four PIV slots (9a, 9c, 9d, 9e) when a certificate is present. One YubiKey can thus serve multiple SSH keys. Use `ssh-add -L` to list them (each line shows the slot, e.g. "PIV Slot 9a" or "PIV Slot 9c"). In `~/.ssh/config` you can use `IdentityFile` or `IdentitiesOnly` to choose which key is used per host.
 
+**Multiple accounts (e.g. two GitHub identities):** If you use slot 9a for one account and 9c for another, SSH will try keys in order and the wrong key can be used. Use the runtime slot switch below (one socket, one agent).
+
+**One socket with systemd and runtime slot switch**
+
+1. Run the agent as a **systemd user service** (one socket): use [contrib/systemd/user/yubikey-agent.service](contrib/systemd/user/yubikey-agent.service) and `systemctl --user enable --now yubikey-agent` (see [systemd.md](systemd.md) or the NixOS/Arch sections above for pcscd and full steps).
+2. Set in your shell profile: `export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/yubikey-agent/yubikey-agent.sock"`.
+3. From your **user account (no root)**, switch which key is used by running:
+   - `yubikey-agent -set-slot 9c` — use slot 9c (e.g. work)
+   - `yubikey-agent -set-slot 9a` — use slot 9a (e.g. personal)
+   - `yubikey-agent -set-slot all` — expose all slots again
+
+The agent uses `SSH_AUTH_SOCK` to find the socket path and writes `PATH.slot` / uses `PATH.pid` to SIGHUP the running agent; no sudo required. If you use a different socket path (e.g. `~/.ssh/yubikey-agent.sock`), pass `-l PATH` to `-set-slot`.
+
 To add another key on an already provisioned YubiKey (after `yubikey-agent -setup`), run:
 
 ```
@@ -195,6 +208,8 @@ yubikey-agent -add-key -slot 9c
 yubikey-agent -add-key -slot 9d
 yubikey-agent -add-key -slot 9e
 ```
+
+Add `-no-touch` to generate a key that does not require a touch to sign (e.g. for automation or when pinentry is unavailable); the key still requires the PIN. This is less secure than the default (touch required).
 
 You will be prompted for your current PIN; the management key is read from the device metadata set during `-setup`.
 

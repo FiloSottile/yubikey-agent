@@ -59,11 +59,11 @@ var addKeySlots = []piv.Slot{
 }
 
 // generateKeyInSlot generates an ECDSA P-384 key and certificate in the given slot and stores the cert on the YubiKey.
-func generateKeyInSlot(yk *piv.YubiKey, key [24]byte, slot piv.Slot) (interface{}, error) {
+func generateKeyInSlot(yk *piv.YubiKey, key [24]byte, slot piv.Slot, touchPolicy piv.TouchPolicy) (interface{}, error) {
 	pub, err := yk.GenerateKey(key, slot, piv.Key{
 		Algorithm:   piv.AlgorithmEC384,
 		PINPolicy:   piv.PINPolicyOnce,
-		TouchPolicy: piv.TouchPolicyAlways,
+		TouchPolicy: touchPolicy,
 	})
 	if err != nil {
 		return nil, err
@@ -189,7 +189,7 @@ func runSetup(yk *piv.YubiKey) {
 		log.Fatalln("use --really-delete-all-piv-keys ⚠️")
 	}
 
-	pub, err := generateKeyInSlot(yk, key, piv.SlotAuthentication)
+	pub, err := generateKeyInSlot(yk, key, piv.SlotAuthentication, piv.TouchPolicyAlways)
 	if err != nil {
 		log.Fatalln("Failed to generate key:", err)
 	}
@@ -212,7 +212,7 @@ func runSetup(yk *piv.YubiKey) {
 	fmt.Println("💭 Remember: everything breaks, have a backup plan for when this YubiKey does.")
 }
 
-func runAddKey(yk *piv.YubiKey, slotFlag string) {
+func runAddKey(yk *piv.YubiKey, slotFlag string, noTouch bool) {
 	if _, err := yk.Certificate(piv.SlotAuthentication); errors.Is(err, piv.ErrNotFound) {
 		log.Fatalln("This YubiKey is not yet set up. Run yubikey-agent -setup first.")
 	} else if err != nil {
@@ -270,10 +270,17 @@ func runAddKey(yk *piv.YubiKey, slotFlag string) {
 		}
 	}
 
+	touchPolicy := piv.TouchPolicyAlways
+	if noTouch {
+		touchPolicy = piv.TouchPolicyNever
+	}
 	fmt.Println("")
 	fmt.Println("Generating key in slot", slot.String(), "...")
+	if noTouch {
+		fmt.Println("(no touch required)")
+	}
 
-	pub, err := generateKeyInSlot(yk, key, slot)
+	pub, err := generateKeyInSlot(yk, key, slot, touchPolicy)
 	if err != nil {
 		log.Fatalln("Failed to generate key:", err)
 	}

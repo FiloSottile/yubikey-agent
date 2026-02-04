@@ -42,9 +42,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\n")
 		fmt.Fprintf(os.Stderr, "\t\tGenerate a new SSH key on the attached YubiKey.\n")
 		fmt.Fprintf(os.Stderr, "\n")
-		fmt.Fprintf(os.Stderr, "\tyubikey-agent -add-key [-slot 9c|9d|9e]\n")
+		fmt.Fprintf(os.Stderr, "\tyubikey-agent -add-key [-slot 9c|9d|9e] [-no-touch]\n")
 		fmt.Fprintf(os.Stderr, "\n")
 		fmt.Fprintf(os.Stderr, "\t\tGenerate a new SSH key in another slot on an already provisioned YubiKey.\n")
+		fmt.Fprintf(os.Stderr, "\t\t-no-touch: key does not require touch to sign (less secure).\n")
 		fmt.Fprintf(os.Stderr, "\n")
 		fmt.Fprintf(os.Stderr, "\tyubikey-agent -list-slots\n")
 		fmt.Fprintf(os.Stderr, "\n")
@@ -53,6 +54,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\tyubikey-agent -l PATH\n")
 		fmt.Fprintf(os.Stderr, "\n")
 		fmt.Fprintf(os.Stderr, "\t\tRun the agent, listening on the UNIX socket at PATH.\n")
+		fmt.Fprintf(os.Stderr, "\t\tSlot file PATH.slot can restrict to one slot; SIGHUP or -set-slot reloads it.\n")
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "\tyubikey-agent -set-slot 9a|9c|9d|9e|all [-l PATH]\n")
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "\t\tSwitch which slot the running agent exposes (writes PATH.slot, sends SIGHUP).\n")
+		fmt.Fprintf(os.Stderr, "\t\tUse \"all\" to expose all slots again. Use -l PATH if not using SSH_AUTH_SOCK.\n")
 		fmt.Fprintf(os.Stderr, "\n")
 	}
 
@@ -61,7 +68,9 @@ func main() {
 	setupFlag := flag.Bool("setup", false, "setup: configure a new YubiKey")
 	addKeyFlag := flag.Bool("add-key", false, "setup: generate a new SSH key in another slot on an already provisioned YubiKey")
 	listSlotsFlag := flag.Bool("list-slots", false, "list PIV slots and whether each has an SSH key")
+	setSlotFlag := flag.String("set-slot", "", "runtime: write slot to agent's .slot file and SIGHUP the agent to switch slot")
 	slotFlag := flag.String("slot", "", "add-key: target slot (9c, 9d, or 9e); if empty, use first empty slot")
+	noTouchFlag := flag.Bool("no-touch", false, "add-key: generate key without touch requirement (TouchPolicyNever)")
 	flag.Parse()
 
 	if flag.NArg() > 0 {
@@ -79,17 +88,90 @@ func main() {
 	} else if *addKeyFlag {
 		log.SetFlags(0)
 		yk := connectForSetup()
-		runAddKey(yk, *slotFlag)
+		runAddKey(yk, *slotFlag, *noTouchFlag)
 	} else if *listSlotsFlag {
 		log.SetFlags(0)
 		yk := connectForSetup()
 		runListSlots(yk)
+	} else if *setSlotFlag != "" {
+		log.SetFlags(0)
+		runSetSlot(*setSlotFlag, *socketPath)
 	} else {
 		if *socketPath == "" {
 			flag.Usage()
 			os.Exit(1)
 		}
 		runAgent(*socketPath)
+	}
+}
+
+func parseSlotEnv(s string) (piv.Slot, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "9a":
+		return piv.SlotAuthentication, nil
+	case "9c":
+		return piv.SlotSignature, nil
+	case "9d":
+		return piv.SlotKeyManagement, nil
+	case "9e":
+		return piv.SlotCardAuthentication, nil
+	default:
+		return piv.Slot{}, fmt.Errorf("slot must be 9a, 9c, 9d, or 9e")
+	}
+}
+
+func readSlotFile(slotFilePath string) ([]piv.Slot, error) {
+	b, err := os.ReadFile(slotFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return sshSlots, nil // no file = all slots
+		}
+		return nil, err
+	}
+	s := strings.TrimSpace(string(b))
+	if s == "" || s == "all" {
+		return sshSlots, nil
+	}
+	slot, err := parseSlotEnv(s)
+	if err != nil {
+		return nil, err
+	}
+	return []piv.Slot{slot}, nil
+}
+
+func runSetSlot(slot, socketPath string) {
+	if socketPath == "" {
+		socketPath = os.Getenv("SSH_AUTH_SOCK")
+	}
+	if socketPath == "" {
+		log.Fatalln("Cannot determine agent socket: set -l PATH or SSH_AUTH_SOCK")
+	}
+	slot = strings.TrimSpace(strings.ToLower(slot))
+	if slot != "all" {
+		if _, err := parseSlotEnv(slot); err != nil {
+			log.Fatalln(err)
+		}
+	}
+	slotFilePath := socketPath + ".slot"
+	if err := os.WriteFile(slotFilePath, []byte(slot+"\n"), 0600); err != nil {
+		log.Fatalln("Failed to write slot file:", err)
+	}
+	pidFilePath := socketPath + ".pid"
+	pidBytes, err := os.ReadFile(pidFilePath)
+	if err != nil {
+		log.Fatalln("Failed to read agent PID (is the agent running?):", err)
+	}
+	var pid int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(pidBytes)), "%d", &pid); err != nil {
+		log.Fatalln("Invalid PID file:", err)
+	}
+	if err := syscall.Kill(pid, syscall.SIGHUP); err != nil {
+		log.Fatalln("Failed to signal agent:", err)
+	}
+	if slot == "all" {
+		fmt.Println("Switched to all slots")
+	} else {
+		fmt.Println("Switched to slot", slot)
 	}
 }
 
@@ -100,12 +182,37 @@ func runAgent(socketPath string) {
 		log.Println("Consider using the launchd or systemd services.")
 	}
 
-	a := &Agent{}
+	slotFilePath := socketPath + ".slot"
+	pidFilePath := socketPath + ".pid"
 
-	c := make(chan os.Signal)
-	signal.Notify(c, syscall.SIGHUP)
+	slots := sshSlots
+	if s := os.Getenv("YUBIKEY_AGENT_SLOT"); s != "" {
+		slot, err := parseSlotEnv(s)
+		if err != nil {
+			log.Fatalln("YUBIKEY_AGENT_SLOT:", err)
+		}
+		slots = []piv.Slot{slot}
+		log.Println("YUBIKEY_AGENT_SLOT="+s+": exposing only PIV slot", s)
+	} else {
+		var err error
+		slots, err = readSlotFile(slotFilePath)
+		if err != nil {
+			log.Println("Reading", slotFilePath+":", err, "(using all slots)")
+		} else if len(slots) == 1 {
+			log.Println("Slot file:", slotFilePath, "→ exposing only PIV slot", slots[0].String())
+		}
+	}
+
+	a := &Agent{slots: slots}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGHUP)
 	go func() {
-		for range c {
+		for range sigChan {
+			if newSlots, err := readSlotFile(slotFilePath); err == nil {
+				a.SetSlots(newSlots)
+				log.Println("Reloaded slot file → now exposing slot(s):", slotSliceString(newSlots))
+			}
 			a.Close()
 		}
 	}()
@@ -117,6 +224,9 @@ func runAgent(socketPath string) {
 	l, err := net.Listen("unix", socketPath)
 	if err != nil {
 		log.Fatalln("Failed to listen on UNIX socket:", err)
+	}
+	if err := os.WriteFile(pidFilePath, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0600); err != nil {
+		log.Println("Failed to write PID file:", err)
 	}
 
 	for {
@@ -140,6 +250,10 @@ type Agent struct {
 	mu     sync.Mutex
 	yk     *piv.YubiKey
 	serial uint32
+
+	// slots is the set of PIV slots this agent exposes (default all four). Can be
+	// restricted to one slot via YUBIKEY_AGENT_SLOT for multiple-account setups.
+	slots []piv.Slot
 
 	// touchNotification is armed by Sign to show a notification if waiting for
 	// more than a few seconds for the touch operation. It is paused and reset
@@ -230,6 +344,31 @@ func openYK() (yk *piv.YubiKey, err error) {
 	return
 }
 
+func slotSliceString(slots []piv.Slot) string {
+	if len(slots) == 0 {
+		return "(none)"
+	}
+	if len(slots) == 1 {
+		return slots[0].String()
+	}
+	var b strings.Builder
+	for i, s := range slots {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(s.String())
+	}
+	return b.String()
+}
+
+func (a *Agent) SetSlots(slots []piv.Slot) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(slots) > 0 {
+		a.slots = slots
+	}
+}
+
 func (a *Agent) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -259,7 +398,7 @@ func (a *Agent) List() ([]*agent.Key, error) {
 	defer a.maybeReleaseYK()
 
 	var keys []*agent.Key
-	for _, slot := range sshSlots {
+	for _, slot := range a.slots {
 		pk, err := getPublicKey(a.yk, slot)
 		if err != nil {
 			continue // skip empty slots or unsupported key types
@@ -309,9 +448,9 @@ func runListSlots(yk *piv.YubiKey) {
 	}
 }
 
-func slotForPublicKey(yk *piv.YubiKey, key ssh.PublicKey) (piv.Slot, error) {
+func slotForPublicKey(yk *piv.YubiKey, key ssh.PublicKey, slots []piv.Slot) (piv.Slot, error) {
 	keyBlob := key.Marshal()
-	for _, slot := range sshSlots {
+	for _, slot := range slots {
 		pk, err := getPublicKey(yk, slot)
 		if err != nil {
 			continue
@@ -336,7 +475,7 @@ func (a *Agent) Signers() ([]ssh.Signer, error) {
 
 func (a *Agent) signers() ([]ssh.Signer, error) {
 	var signers []ssh.Signer
-	for _, slot := range sshSlots {
+	for _, slot := range a.slots {
 		pk, err := getPublicKey(a.yk, slot)
 		if err != nil {
 			continue
@@ -370,7 +509,7 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 	}
 	defer a.maybeReleaseYK()
 
-	slot, err := slotForPublicKey(a.yk, key)
+	slot, err := slotForPublicKey(a.yk, key, a.slots)
 	if err != nil {
 		return nil, fmt.Errorf("no private keys match the requested public key")
 	}
