@@ -1,0 +1,26 @@
+# Built binary
+/yubikey-agent
+
+# Nix
+/result
+/result-*
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+__debug_bin
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
