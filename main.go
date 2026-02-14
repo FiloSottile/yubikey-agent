@@ -40,7 +40,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\n")
 		fmt.Fprintf(os.Stderr, "\tyubikey-agent -setup\n")
 		fmt.Fprintf(os.Stderr, "\n")
-		fmt.Fprintf(os.Stderr, "\t\tGenerate a new SSH key on the attached YubiKey.\n")
+		fmt.Fprintf(os.Stderr, "\t\tSetup YubiKey and generate a new SSH key on it.\n")
+		fmt.Fprintf(os.Stderr, "\tyubikey-agent -add-key\n")
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "\t\tGenerate additional SSH key on the attached YubiKey.\n")
 		fmt.Fprintf(os.Stderr, "\n")
 		fmt.Fprintf(os.Stderr, "\tyubikey-agent -l PATH\n")
 		fmt.Fprintf(os.Stderr, "\n")
@@ -49,8 +52,13 @@ func main() {
 	}
 
 	socketPath := flag.String("l", "", "agent: path of the UNIX socket to listen on")
+	slotsList := flag.String("slots", "auto", "agent: comma-separated list of PIV slots to use in SSH keys (9a, 9c, 9d, 9e, 82-95) or `auto` for auto-detect")
 	resetFlag := flag.Bool("really-delete-all-piv-keys", false, "setup: reset the PIV applet")
 	setupFlag := flag.Bool("setup", false, "setup: configure a new YubiKey")
+	addKeyFlag := flag.Bool("add-key", false, "setup: generate a new SSH key on the YubiKey")
+	keySlot := flag.String("slot", "", "setup: PIV slot for the new SSH key (9a, 9c, 9d, 9e, 82-95)")
+	keyAlgo := flag.String("algo", "", "setup: algorithm for the new SSH key (ec256(default), ec384, ed25519, rsa2048)")
+	keyTouchPolicy := flag.String("touch-policy", "cached", "setup: touch policy for the new SSH key (cached, always(default) or never)")
 	flag.Parse()
 
 	if flag.NArg() > 0 {
@@ -64,24 +72,70 @@ func main() {
 		if *resetFlag {
 			runReset(yk)
 		}
-		runSetup(yk)
+		key := runSetup(yk)
+		runAddKey(yk, key, *keySlot, *keyAlgo, *keyTouchPolicy)
+	} else if *addKeyFlag {
+		log.SetFlags(0)
+		yk := connectForSetup()
+		key := getManagementKey(yk)
+		runAddKey(yk, key, *keySlot, *keyAlgo, *keyTouchPolicy)
 	} else {
+		// Agent mode
 		if *socketPath == "" {
 			flag.Usage()
 			os.Exit(1)
 		}
-		runAgent(*socketPath)
+		runAgent(*socketPath, *slotsList)
 	}
 }
 
-func runAgent(socketPath string) {
+func parseSlots(slotsList string) []piv.Slot {
+	var slots []piv.Slot
+
+	if slotsList == "auto" {
+		slotsStr := []string{"9a", "9c", "9d", "9e"}
+		for i := 0x82; i <= 0x95; i++ {
+			slotsStr = append(slotsStr, fmt.Sprintf("%x", i))
+		}
+		yk, err := openYK()
+		if err != nil {
+			log.Fatalln("Failed to connect to the YubiKey:", err)
+		}
+		defer yk.Close()
+		for i := range slotsStr {
+			slot, err := parseSlot(slotsStr[i])
+			if err != nil {
+				log.Fatalf("Invalid slot `%s` in auto-detected slots: %s\n", slotsStr[i], err)
+			}
+			_, err = yk.Certificate(slot)
+			if err == nil {
+				slots = append(slots, slot)
+			}
+		}
+		return slots
+	}
+
+	for _, slotStr := range strings.Split(slotsList, ",") {
+		slot, err := parseSlot(slotStr)
+		if err != nil {
+			log.Fatalf("Invalid slot `%s` in slots: %s\n", slotStr, err)
+		}
+		slots = append(slots, slot)
+	}
+
+	return slots
+}
+
+func runAgent(socketPath string, slotsList string) {
 	if terminal.IsTerminal(int(os.Stdin.Fd())) {
 		log.Println("Warning: yubikey-agent is meant to run as a background daemon.")
 		log.Println("Running multiple instances is likely to lead to conflicts.")
 		log.Println("Consider using the launchd or systemd services.")
 	}
 
-	a := &Agent{}
+	slots := parseSlots(slotsList)
+
+	a := &Agent{slots: slots}
 
 	c := make(chan os.Signal)
 	signal.Notify(c, syscall.SIGHUP)
@@ -126,6 +180,8 @@ type Agent struct {
 	// more than a few seconds for the touch operation. It is paused and reset
 	// by getPIN so it won't fire while waiting for the PIN.
 	touchNotification *time.Timer
+
+	slots []piv.Slot
 }
 
 var _ agent.ExtendedAgent = &Agent{}
@@ -231,15 +287,24 @@ func (a *Agent) List() ([]*agent.Key, error) {
 	}
 	defer a.maybeReleaseYK()
 
-	pk, err := getPublicKey(a.yk, piv.SlotAuthentication)
-	if err != nil {
-		return nil, err
+	var keys []*agent.Key
+	for _, slot := range a.slots {
+		pk, err := getPublicKey(a.yk, slot)
+		if err != nil {
+			// If a slot doesn't have a key, skip it silently
+			if errors.Is(err, piv.ErrNotFound) {
+				continue
+			}
+			log.Printf("Warning: could not get public key for slot %s: %v", slot, err)
+			continue
+		}
+		keys = append(keys, &agent.Key{
+			Format:  pk.Type(),
+			Blob:    pk.Marshal(),
+			Comment: fmt.Sprintf("YubiKey #%d PIV Slot %s", a.serial, slot),
+		})
 	}
-	return []*agent.Key{{
-		Format:  pk.Type(),
-		Blob:    pk.Marshal(),
-		Comment: fmt.Sprintf("YubiKey #%d PIV Slot 9a", a.serial),
-	}}, nil
+	return keys, nil
 }
 
 func getPublicKey(yk *piv.YubiKey, slot piv.Slot) (ssh.PublicKey, error) {
@@ -272,23 +337,34 @@ func (a *Agent) Signers() ([]ssh.Signer, error) {
 }
 
 func (a *Agent) signers() ([]ssh.Signer, error) {
-	pk, err := getPublicKey(a.yk, piv.SlotAuthentication)
-	if err != nil {
-		return nil, err
+	var signers []ssh.Signer
+	for _, slot := range a.slots {
+		pk, err := getPublicKey(a.yk, slot)
+		if err != nil {
+			// If a slot doesn't have a key, skip it silently
+			if errors.Is(err, piv.ErrNotFound) {
+				continue
+			}
+			log.Printf("Warning: could not get public key for slot %s: %v", slot, err)
+			continue
+		}
+		priv, err := a.yk.PrivateKey(
+			slot,
+			pk.(ssh.CryptoPublicKey).CryptoPublicKey(),
+			piv.KeyAuth{PINPrompt: a.getPIN},
+		)
+		if err != nil {
+			log.Printf("Warning: failed to prepare private key for slot %s: %v", slot, err)
+			continue
+		}
+		s, err := ssh.NewSignerFromKey(priv)
+		if err != nil {
+			log.Printf("Warning: failed to prepare signer for slot %s: %v", slot, err)
+			continue
+		}
+		signers = append(signers, s)
 	}
-	priv, err := a.yk.PrivateKey(
-		piv.SlotAuthentication,
-		pk.(ssh.CryptoPublicKey).CryptoPublicKey(),
-		piv.KeyAuth{PINPrompt: a.getPIN},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare private key: %w", err)
-	}
-	s, err := ssh.NewSignerFromKey(priv)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare signer: %w", err)
-	}
-	return []ssh.Signer{s}, nil
+	return signers, nil
 }
 
 func (a *Agent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {

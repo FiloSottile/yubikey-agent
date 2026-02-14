@@ -13,12 +13,12 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"errors"
 	"fmt"
 	"log"
 	"math/big"
 	"os"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/go-piv/piv-go/piv"
@@ -50,6 +50,17 @@ func connectForSetup() *piv.YubiKey {
 	return yk
 }
 
+func isInitialized(yk *piv.YubiKey) bool {
+	if err := yk.SetManagementKey(piv.DefaultManagementKey, piv.DefaultManagementKey); err != nil {
+		return true
+	}
+	// This could affect tries counter
+	if _, err := yk.Metadata(piv.DefaultPIN); err != nil {
+		return true
+	}
+	return false
+}
+
 func runReset(yk *piv.YubiKey) {
 	fmt.Print(`Do you want to reset the PIV applet? This will delete all PIV keys. Type "delete": `)
 	var res string
@@ -66,36 +77,98 @@ func runReset(yk *piv.YubiKey) {
 	}
 }
 
-func runSetup(yk *piv.YubiKey) {
-	if _, err := yk.Certificate(piv.SlotAuthentication); err == nil {
+func readPass(name string) string {
+	for {
+		fmt.Printf("Enter new %s: ", name)
+		pass, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Print("\n")
+		if err != nil {
+			log.Fatalf("Failed to read %s: %v\n", name, err)
+		}
+		if len(pass) < 6 || len(pass) > 8 {
+			log.Fatalf("The %s needs to be 6-8 characters.\n", name)
+		}
+		fmt.Printf("Repeat %s: ", name)
+		repeat, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Print("\n")
+		if err != nil {
+			log.Fatalf("Failed to read %s: %v\n", name, err)
+		} else if bytes.Equal(repeat, pass) {
+			return string(pass)
+		}
+		log.Printf("%ss don't match!\n", name)
+	}
+}
+
+// parseSlot converts a string to piv.Slot
+func parseSlot(slot string) (piv.Slot, error) {
+	slot = strings.TrimPrefix(slot, "0x")
+	switch slot {
+	case "", "9a":
+		return piv.SlotAuthentication, nil
+	case "9c":
+		return piv.SlotSignature, nil
+	case "9d":
+		return piv.SlotKeyManagement, nil
+	case "9e":
+		return piv.SlotCardAuthentication, nil
+	default:
+		// Try parsing as retired key management slot (0x82-0x95)
+		var key uint32
+		if _, err := fmt.Sscanf(slot, "%x", &key); err != nil {
+			return piv.Slot{}, fmt.Errorf("invalid slot identifier: %s", slot)
+		}
+		slot_, ok := piv.RetiredKeyManagementSlot(key)
+		if !ok {
+			return piv.Slot{}, fmt.Errorf("invalid retired key management slot: %s", slot)
+		}
+		return slot_, nil
+	}
+}
+
+// parseTouchPolicy converts a string to piv.TouchPolicy
+func parseTouchPolicy(policy string) (piv.TouchPolicy, error) {
+	switch policy {
+	case "", "always":
+		return piv.TouchPolicyAlways, nil
+	case "never":
+		return piv.TouchPolicyNever, nil
+	case "cached":
+		return piv.TouchPolicyCached, nil
+	default:
+		return 0, fmt.Errorf("invalid touch policy: %s (must be 'never', 'always', or 'cached')", policy)
+	}
+}
+
+// parseAlgorithm converts a string to piv.Algorithm
+func parseAlgorithm(algo string) (piv.Algorithm, error) {
+	switch algo {
+	case "", "ec256":
+		return piv.AlgorithmEC256, nil
+	case "ec384":
+		return piv.AlgorithmEC384, nil
+	case "ed25519":
+		return piv.AlgorithmEd25519, nil
+	case "rsa2048":
+		return piv.AlgorithmRSA2048, nil
+	default:
+		return 0, fmt.Errorf("invalid algorithm: %s (must be 'ec256', 'ec384', 'ed25519' or 'rsa2048')", algo)
+	}
+}
+
+func runSetup(yk *piv.YubiKey) [24]byte {
+	if isInitialized(yk) {
 		log.Println("‼️  This YubiKey looks already setup")
 		log.Println("")
 		log.Println("If you want to wipe all PIV keys and start fresh,")
 		log.Fatalln("use --really-delete-all-piv-keys ⚠️")
-	} else if !errors.Is(err, piv.ErrNotFound) {
-		log.Fatalln("Failed to access authentication slot:", err)
 	}
 
-	fmt.Println("🔐 The PIN is up to 8 numbers, letters, or symbols. Not just numbers!")
+	fmt.Println("🔐 The PIN/PUK are up to 8 numbers, letters, or symbols. Not just numbers!")
 	fmt.Println("❌ The key will be lost if the PIN and PUK are locked after 3 incorrect tries.")
 	fmt.Println("")
-	fmt.Print("Choose a new PIN/PUK: ")
-	pin, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Print("\n")
-	if err != nil {
-		log.Fatalln("Failed to read PIN:", err)
-	}
-	if len(pin) < 6 || len(pin) > 8 {
-		log.Fatalln("The PIN needs to be 6-8 characters.")
-	}
-	fmt.Print("Repeat PIN/PUK: ")
-	repeat, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Print("\n")
-	if err != nil {
-		log.Fatalln("Failed to read PIN:", err)
-	} else if !bytes.Equal(repeat, pin) {
-		log.Fatalln("PINs don't match!")
-	}
+	pin := readPass("PIN")
+	puk := readPass("PUK")
 
 	fmt.Println("")
 	fmt.Println("🧪 Reticulating splines...")
@@ -118,7 +191,7 @@ func runSetup(yk *piv.YubiKey) {
 	}); err != nil {
 		log.Fatalln("Failed to store the Management Key on the device:", err)
 	}
-	if err := yk.SetPIN(piv.DefaultPIN, string(pin)); err != nil {
+	if err := yk.SetPIN(piv.DefaultPIN, pin); err != nil {
 		log.Println("‼️  The default PIN did not work")
 		log.Println("")
 		log.Println("If you know what you're doing, reset PIN, PUK, and")
@@ -127,7 +200,7 @@ func runSetup(yk *piv.YubiKey) {
 		log.Println("If you want to wipe all PIV keys and start fresh,")
 		log.Fatalln("use --really-delete-all-piv-keys ⚠️")
 	}
-	if err := yk.SetPUK(piv.DefaultPUK, string(pin)); err != nil {
+	if err := yk.SetPUK(piv.DefaultPUK, puk); err != nil {
 		log.Println("‼️  The default PUK did not work")
 		log.Println("")
 		log.Println("If you know what you're doing, reset PIN, PUK, and")
@@ -136,11 +209,49 @@ func runSetup(yk *piv.YubiKey) {
 		log.Println("If you want to wipe all PIV keys and start fresh,")
 		log.Fatalln("use --really-delete-all-piv-keys ⚠️")
 	}
+	return key
+}
 
-	pub, err := yk.GenerateKey(key, piv.SlotAuthentication, piv.Key{
-		Algorithm:   piv.AlgorithmEC256,
+func getManagementKey(yk *piv.YubiKey) [24]byte {
+	if !isInitialized(yk) {
+		log.Fatalln("This YubiKey doesn't look initialized. Run with --setup first.")
+	}
+	fmt.Printf("Enter PIN: ")
+	pin, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Print("\n")
+	if err != nil {
+		log.Fatalln("Failed to read PIN:", err)
+	}
+
+	metadata, err := yk.Metadata(string(pin))
+	if err != nil {
+		log.Fatalln("Failed to read management key from YubiKey:", err)
+	}
+	managementKey := metadata.ManagementKey
+	return *managementKey
+}
+
+func runAddKey(yk *piv.YubiKey, managementKey [24]byte, slot string, algo string, touchPolicy string) {
+	slot_, err := parseSlot(slot)
+	if err != nil {
+		log.Fatalln("Failed to parse slot:", err)
+	}
+
+	algo_, err := parseAlgorithm(algo)
+	if err != nil {
+		log.Fatalln("Failed to parse algorithm:", err)
+	}
+
+	touchPolicy_, err := parseTouchPolicy(touchPolicy)
+	if err != nil {
+		log.Fatalln("Failed to parse touch policy:", err)
+	}
+
+	log.Println("Generating key on the YubiKey...")
+	pub, err := yk.GenerateKey(managementKey, slot_, piv.Key{
+		Algorithm:   algo_,
 		PINPolicy:   piv.PINPolicyOnce,
-		TouchPolicy: piv.TouchPolicyAlways,
+		TouchPolicy: touchPolicy_,
 	})
 	if err != nil {
 		log.Fatalln("Failed to generate key:", err)
@@ -174,7 +285,7 @@ func runSetup(yk *piv.YubiKey) {
 	if err != nil {
 		log.Fatalln("Failed to parse certificate:", err)
 	}
-	if err := yk.SetCertificate(key, piv.SlotAuthentication, cert); err != nil {
+	if err := yk.SetCertificate(managementKey, slot_, cert); err != nil {
 		log.Fatalln("Failed to store certificate:", err)
 	}
 

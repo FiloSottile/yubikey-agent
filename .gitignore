@@ -1,0 +1,6 @@
+# Binaries
+yubikey-agent
+*.exe
+*.dll
+*.so
+*.dylib
