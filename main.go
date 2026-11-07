@@ -322,7 +322,9 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 				a.touchNotification.Stop()
 				return
 			}
-			showNotification("Waiting for YubiKey touch...")
+			dismiss := showNotification("Waiting for YubiKey touch...")
+			<-ctx.Done()
+			dismiss()
 		}()
 
 		alg := key.Type()
@@ -338,9 +340,22 @@ func (a *Agent) SignWithFlags(key ssh.PublicKey, data []byte, flags agent.Signat
 	return nil, fmt.Errorf("no private keys match the requested public key")
 }
 
-func showNotification(message string) {
+// terminalNotifier is the path of terminal-notifier, if installed. Unlike
+// osascript, it can remove the notifications it shows.
+var terminalNotifier, _ = exec.LookPath("terminal-notifier")
+
+// showNotification shows message, and returns a function that removes it if
+// possible.
+func showNotification(message string) (dismiss func()) {
 	switch runtime.GOOS {
 	case "darwin":
+		if terminalNotifier != "" && exec.Command(terminalNotifier,
+			"-title", "yubikey-agent", "-message", message,
+			"-group", "yubikey-agent").Run() == nil {
+			return func() {
+				exec.Command(terminalNotifier, "-remove", "yubikey-agent").Run()
+			}
+		}
 		message = strings.ReplaceAll(message, `\`, `\\`)
 		message = strings.ReplaceAll(message, `"`, `\"`)
 		appleScript := `display notification "%s" with title "yubikey-agent"`
@@ -348,6 +363,7 @@ func showNotification(message string) {
 	case "linux":
 		exec.Command("notify-send", "-i", "dialog-password", "yubikey-agent", message).Run()
 	}
+	return func() {}
 }
 
 func (a *Agent) Extension(extensionType string, contents []byte) ([]byte, error) {
